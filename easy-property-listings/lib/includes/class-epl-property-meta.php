@@ -242,12 +242,15 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		 *
 		 * @param bool   $ical True to return link with iCal.
 		 * @param string $meta_key The meta key to get the value from default is property_inspection_times.
+		 *
 		 * @return mixed Return formatted inspection times with a iCal link
+		 *
 		 * @since 2.0
 		 * @since 3.4.27 Added filter for href, handling of non date inspection values.
 		 * @since 3.4.44 Added filter for deciding whether to remove inspection entry.
 		 * @since 3.5.3  Fix: Deprecation warning - Make sure inspection time is not null before passing through trim.
 		 * @since 3.5.3  Update to use local timestamp.
+		 * @since 3.5.13 Tweak: Target blank added to ical link.
 		 */
 		public function get_property_inspection_times( $ical = true, $meta_key = 'property_inspection_times' ) {
 			if ( 'leased' === $this->get_property_meta( 'property_status' ) || 'sold' === $this->get_property_meta( 'property_status' ) ) {
@@ -311,7 +314,8 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 										//phpcs:disable
 										$return .= "<a
 											class ='epl_inspection_calendar'
-											href='" . $href . "' >"
+											href='" . $href . "'
+											target='_blank' >"
 											. $element_formatted . '
 										</a>';
 										//phpcs:enable
@@ -1608,7 +1612,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$value  = $this->get_property_meta( 'property_air_conditioning' );
 			$return = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				switch ( $returntype ) {
 
@@ -1670,7 +1674,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$value  = $this->get_property_meta( 'property_pool' );
 			$return = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				switch ( $returntype ) {
 
@@ -1729,7 +1733,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 
 			$return = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				switch ( $returntype ) {
 
@@ -1953,9 +1957,12 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		/**
 		 * Get New Construction
 		 *
-		 * @since 2.0
 		 * @param string $returntype Options i = span, v = raw value, t = text, d = string, l = list item.
+		 *
 		 * @return string
+		 *
+		 * @since 2.0
+		 * @since 3.5.13 Using value bool checker function.
 		 */
 		public function get_property_new_construction( $returntype = 'i' ) {
 
@@ -1963,7 +1970,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$return     = '';
 			$returntype = apply_filters( 'epl_get_property_new_construction_return_type', $returntype );
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				$label = apply_filters( 'epl_get_property_new_construction_label', __( 'New Construction', 'easy-property-listings' ) );
 
@@ -1999,9 +2006,12 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		/**
 		 * Get Holiday Rental
 		 *
-		 * @since 3.2
 		 * @param string $returntype Options i = span, v = raw value, t = text, d = string, l = list item.
+		 *
 		 * @return string
+		 *
+		 * @since 3.2
+		 * @since 3.5.13 Using value bool checker function.
 		 */
 		public function get_property_holiday_rental( $returntype = 'i' ) {
 
@@ -2010,7 +2020,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$return     = '';
 			$returntype = apply_filters( 'epl_get_property_holiday_rental_return_type', $returntype );
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				switch ( $returntype ) {
 
@@ -2043,9 +2053,12 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		/**
 		 * Get Furnished
 		 *
-		 * @since 3.2
 		 * @param string $returntype Options i = span, v = raw value, t = text, d = string, l = list item.
+		 *
 		 * @return string
+		 *
+		 * @since 3.2
+		 * @since 3.5.13 Using value bool checker function.
 		 */
 		public function get_property_furnished( $returntype = 'i' ) {
 
@@ -2053,7 +2066,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$returntype = apply_filters( 'epl_get_property_furnished_return_type', $returntype );
 			$return     = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				$label = apply_filters( 'epl_get_property_furnished_label', __( 'Furnished', 'easy-property-listings' ) );
 
@@ -2089,9 +2102,12 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		/**
 		 * Get Pets
 		 *
-		 * @since 3.3
 		 * @param string $returntype Options i = span, v = raw value, t = text, d = string, l = list item.
+		 *
 		 * @return string
+		 *
+		 * @since 3.3
+		 * @since 3.5.13 Using value bool checker function.
 		 */
 		public function get_property_pets( $returntype = 'i' ) {
 
@@ -2099,7 +2115,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$returntype = apply_filters( 'epl_get_property_pet_friendly_return_type', $returntype );
 			$return     = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				$label = apply_filters( 'epl_get_property_pet_friendly_label', __( 'Pet Friendly', 'easy-property-listings' ) );
 
@@ -2135,9 +2151,12 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		/**
 		 * Get Featured
 		 *
-		 * @since 3.3
 		 * @param string $returntype Options i = span, v = raw value, t = text, d = string, l = list item.
+		 *
 		 * @return string
+		 *
+		 * @since 3.3
+		 * @since 3.5.13 Using value bool checker function.
 		 */
 		public function get_property_featured( $returntype = 'i' ) {
 
@@ -2145,7 +2164,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 			$returntype = apply_filters( 'epl_get_property_featured_return_type', $returntype );
 			$return     = '';
 
-			if ( isset( $value ) && ( 1 === $value || 'yes' === $value ) ) {
+			if ( epl_value_bool_checker( $value ) ) {
 
 				$label = apply_filters( 'epl_get_property_featured_label', __( 'Featured', 'easy-property-listings' ) );
 
