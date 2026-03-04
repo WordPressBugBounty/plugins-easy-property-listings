@@ -250,6 +250,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		 * @since 3.5.3  Fix: Deprecation warning - Make sure inspection time is not null before passing through trim.
 		 * @since 3.5.3  Update to use local timestamp.
 		 * @since 3.5.13 Tweak: Target blank added to ical link.
+		 * @since 3.5.21 Added a signed token to the iCal inspection link and switched URL generation to add_query_arg().
 		 */
 		public function get_property_inspection_times( $ical = true, $meta_key = 'property_inspection_times' ) {
 			if ( 'leased' === $this->get_property_meta( 'property_status' ) || 'sold' === $this->get_property_meta( 'property_status' ) ) {
@@ -303,7 +304,16 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 
 								} else {
 
-									$href = get_bloginfo( 'url' ) . '?epl_cal_dl=1&cal=ical&dt=' . base64_encode( htmlspecialchars( $element, ENT_QUOTES, 'UTF-8' ) ) . '&propid=' . $this->post->ID;
+									$href = add_query_arg(
+										array(
+											'epl_cal_dl' => 1,
+											'cal'        => 'ical',
+											'dt'         => base64_encode( htmlspecialchars( $element, ENT_QUOTES, 'UTF-8' ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+											'propid'     => $this->post->ID,
+											'k'          => epl_get_ical_download_token( $this->post->ID, $element ),
+										),
+										home_url( '/' )
+									);
 
 									$href = apply_filters( 'epl_inspection_link', $href );
 
