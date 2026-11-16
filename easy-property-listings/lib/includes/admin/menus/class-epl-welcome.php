@@ -85,6 +85,7 @@ class EPL_Welcome {
 	 *
 	 * @access public
 	 * @since 1.0
+	 * @since 3.6 Styles for the What's New headlines.
 	 * @return void
 	 */
 	public function admin_head() {
@@ -120,6 +121,46 @@ class EPL_Welcome {
 			float: right;
 			margin-left: 10px!important;
 		}
+
+		.epl-whats-new {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			gap: 20px;
+			margin: 24px 0;
+		}
+
+		@media (max-width: 1280px) {
+			.epl-whats-new {
+				grid-template-columns: repeat(2, 1fr);
+			}
+		}
+
+		@media (max-width: 600px) {
+			.epl-whats-new {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		.epl-whats-new__item {
+			background: #fff;
+			border-radius: 8px;
+			padding: 24px;
+			box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+		}
+
+		.epl-about-wrap .epl-whats-new__item h3 {
+			margin: 0 0 8px;
+			font-size: 18px;
+		}
+
+		.epl-about-wrap .epl-whats-new__item p {
+			margin: 0;
+			font-size: 14px;
+		}
+
+		.epl-whats-new__more {
+			text-align: center;
+		}
 		/*]]>*/
 		</style>
 		<?php
@@ -153,6 +194,7 @@ class EPL_Welcome {
 	 * Parse the EPL readme.txt file
 	 *
 	 * @since 3.1.20
+	 * @since 3.6 Fix: shows only the Changelog section. The Upgrade Notice section after it showed as stray "=" lines and an "Upgrade Notice" heading.
 	 * @return string $readme HTML formatted readme file
 	 */
 	public function parse_readme() {
@@ -161,9 +203,11 @@ class EPL_Welcome {
 			$readme = '<p>' . esc_html__( 'No valid changelog was found.', 'easy-property-listings' ) . '</p>';
 		} else {
 			$readme = file_get_contents( $file ); //phpcs:ignore
-			$readme = nl2br( esc_html( $readme ) );
 			$readme = explode( '== Changelog ==', $readme );
 			$readme = end( $readme );
+			// Stop at the next section (== Upgrade Notice ==).
+			$readme = preg_split( '/^== /m', $readme );
+			$readme = nl2br( esc_html( trim( $readme[0] ) ) );
 			$readme = preg_replace( '/`(.*?)`/', '<code>\\1</code>', $readme );
 			$readme = preg_replace( '/[\040]\*\*(.*?)\*\*/', ' <strong>\\1</strong>', $readme );
 			$readme = preg_replace( '/[\040]\*(.*?)\*/', ' <em>\\1</em>', $readme );
@@ -174,10 +218,51 @@ class EPL_Welcome {
 	}
 
 	/**
+	 * What's new in this version: a few headlines for the What's New tab.
+	 *
+	 * The full story is a post on easypropertylistings.com.au/whats-new/, so only these
+	 * few lines need translating each release. Edit them for each x.y.0 release.
+	 *
+	 * @since 3.6 New: headlines are back on the What's New tab.
+	 *
+	 * @return array Each item has a title and a text.
+	 */
+	public function get_whats_new() {
+		$items = array(
+			array(
+				'title' => __( 'Search up to 48 times faster', 'easy-property-listings' ),
+				'text'  => __( 'Search pages, dropdowns and listing counts load in a fraction of the time, with the same results.', 'easy-property-listings' ),
+			),
+			array(
+				'title' => __( 'Under Offer keeps the price', 'easy-property-listings' ),
+				'text'  => __( 'Under offer listings show their advertised price, as NSW underquoting rules require. Change it in Settings > Labels.', 'easy-property-listings' ),
+			),
+			array(
+				'title' => __( 'One listing shortcode', 'easy-property-listings' ),
+				'text'  => __( '[listing] now does everything [listing_advanced] does: features, locations, open homes, auctions and more.', 'easy-property-listings' ),
+			),
+			array(
+				'title' => __( 'Elementor widgets (beta)', 'easy-property-listings' ),
+				'text'  => __( 'Design single listing, archive and agent templates in Elementor with 30 Easy Property Listings widgets.', 'easy-property-listings' ),
+			),
+		);
+
+		/**
+		 * Filters the What's New headlines on the welcome page.
+		 *
+		 * @since 3.6
+		 *
+		 * @param array $items Each item has a title and a text.
+		 */
+		return (array) apply_filters( 'epl_whats_new_items', $items );
+	}
+
+	/**
 	 * Render About Screen
 	 *
 	 * @access public
 	 * @since 1.0
+	 * @since 3.6 What's New headlines and a link to the full post on easypropertylistings.com.au instead of the "visit the website" notice.
 	 * @return void
 	 */
 	public function about_screen() {
@@ -206,11 +291,30 @@ class EPL_Welcome {
 			<?php $this->tabs(); ?>
 
 			<div class="changelog headline-feature epl-clearfix">
-				<h2><?php esc_html_e( 'Visit Easy Property Listings to Discover What\'s New', 'easy-property-listings' ); ?></h2>
+				<h2 id="guide-theme">
+					<?php
+						/* Translators: %s is the version number. */
+						printf( esc_html__( 'What\'s New in %s', 'easy-property-listings' ), esc_html( $display_version ) );
+					?>
+				</h2>
 
-				<div class="feature-section">
-					<p class="lead-description"><?php esc_html_e( 'By removing the what\'s new page we can aid translators in translating the plugin into more languages.', 'easy-property-listings' ); ?></p>
+				<div class="epl-whats-new">
+					<?php foreach ( $this->get_whats_new() as $item ) : ?>
+						<div class="epl-whats-new__item">
+							<h3><?php echo esc_html( $item['title'] ); ?></h3>
+							<p><?php echo esc_html( $item['text'] ); ?></p>
+						</div>
+					<?php endforeach; ?>
 				</div>
+
+				<p class="epl-whats-new__more">
+					<a class="button button-primary button-hero" href="<?php echo esc_url( 'https://easypropertylistings.com.au/whats-new/?utm_source=plugin&utm_medium=welcome&utm_content=whats_new&utm_campaign=epl_whats_new' ); ?>" target="_blank" rel="noopener noreferrer">
+						<?php
+							/* Translators: %s is the version number. */
+							printf( esc_html__( 'See everything new in %s', 'easy-property-listings' ), esc_html( $display_version ) );
+						?>
+					</a>
+				</p>
 			</div>
 
 

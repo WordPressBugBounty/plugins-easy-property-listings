@@ -7,7 +7,7 @@ Tags: real estate, property, listings, rental, reports
 Requires PHP: 7.4
 Requires at least: 6.0
 Tested up to: 7.1
-Stable Tag: 3.5.29
+Stable Tag: 3.6
 License: GPLv2 or later
 
 Fast. Flexible. Forward-thinking solution for real estate agents using WordPress. Built for scale, listing management and works with any theme.
@@ -17,6 +17,15 @@ Fast. Flexible. Forward-thinking solution for real estate agents using WordPress
 Easy Property Listings is one of the most dynamic and feature rich Real Estate plugin for WordPress available on the market today.
 
 An easy-to-use plugin that provides the needed functions to configure a dynamic real estate website in minutes. Packed with advanced features, shortcodes and templates letting you create real estate websites fast.
+
+**New in 3.6**
+
+* Under offer listings show their advertised price, as NSW underquoting rules require from 17 November 2026.
+* Search up to 48 times faster on large sites, and pages with a search form 3 to 5 times faster.
+* One listing shortcode: [listing] takes every [listing_advanced] option.
+* Elementor widgets and templates (beta).
+
+[See everything new in 3.6](https://easypropertylistings.com.au/whats-new/?utm_source=readme&utm_medium=description_tab&utm_content=new_in_version&utm_campaign=epl_whats_new).
 
 **Features:**
 
@@ -209,6 +218,8 @@ Several short codes to insert your listings into posts and pages with many custo
 
 The [listing] shortcode allows you to output your listings on pages and posts with advanced filtering options for listing types, order, status filtering, locations and much more which you can [read about the settings and options here](https://codex.easypropertylistings.com.au/article/24-listing?utm_source=readme&utm_medium=description_tab&utm_content=documentation_link&utm_campaign=wordpressorg).
 
+From 3.6, [listing] and [listing_advanced] are the same shortcode, so [listing] can also filter by feature, location, open homes, auctions and custom fields. [See all the options](https://codex.easypropertylistings.com.au/article/443-listingadvanced-shortcode?utm_source=readme&utm_medium=description_tab&utm_content=documentation_link&utm_campaign=wordpressorg).
+
 **Listing Open**
 
 The [listing_open] shortcode quickly outputs listings that have scheduled open for inspection times. Use this on posts so your site will always have an up-to-date list of properties open for inspection. Use the [listing_open post_type="property" template="table"] or for rentals and slimmer [listing_open post_type="rental" template="table_open"] option to create a slim list of listings.
@@ -224,6 +235,10 @@ Use the [listing_category] short code to filter listings by any variable you wan
 **Use any theme**
 
 Use any theme you want which means you can use your creativity and build beautiful websites the way you want. We’ve kept CSS to a minimum so it looks great on any theme you choose.
+
+**Elementor (beta)**
+
+With Elementor active, Easy Property Listings adds widgets for listings, archives, agents and staff, and templates for single listings and listing cards. [Read more](https://codex.easypropertylistings.com.au/article/676-elementor-templates-settings?utm_source=readme&utm_medium=description_tab&utm_content=documentation_link&utm_campaign=wordpressorg).
 
 **Developer Features:**
 
@@ -397,12 +412,12 @@ To get rid of the 404 error when viewing a listing, you need to re-save your per
 
 Place the php function on your single.php template in your theme <?php do_action( 'epl_single_author' ); ?>
 
-= Can I add integrations for third party real estate applications like 1Form or Inspect Real Estate? =
+= Can I add integrations for third party real estate applications like 1Form or Reapit Lettings (formerly Inspect Real Estate)? =
 
 Yes, through the addition of one or more of the add-on integrations, you can quickly integrate third party buttons to listings. The add-on gateways currently available:
 
 * [1form](https://easypropertylistings.com.au/extensions/1form/?utm_source=readme&utm_medium=faq_tab&utm_content=extensions_link&utm_campaign=epl_extension_1form)
-* [Inspect Real Estate](https://easypropertylistings.com.au/extensions/inspect-real-estate/?utm_source=readme&utm_medium=faq_tab&utm_content=extensions_link&utm_campaign=epl_extension_inspect_real_estate)
+* [Reapit Lettings (formerly Inspect Real Estate)](https://easypropertylistings.com.au/extensions/inspect-real-estate/?utm_source=readme&utm_medium=faq_tab&utm_content=extensions_link&utm_campaign=epl_extension_inspect_real_estate)
 * [Rate My Agent](https://easypropertylistings.com.au/extensions/rate-my-agent/?utm_source=readme&utm_medium=faq_tab&utm_content=extensions_link&utm_campaign=epl_extension_rate_my_agent)
 
 = How do I report a security vulnerability? =
@@ -423,3 +438,8 @@ Please report security issues privately by email to support@easypropertylistings
 == Changelog ==
 
 Discover [What's New](https://easypropertylistings.com.au/whats-new/?utm_source=readme&utm_medium=whats_new_tab&utm_content=new&utm_campaign=epl_whats_new) with [Easy Property Listings](https://easypropertylistings.com.au/?utm_source=readme&utm_medium=whats_new_tab&utm_content=home&utm_campaign=link_home). The [change log](https://easypropertylistings.com.au/change-log/?utm_source=readme&utm_medium=change_log_tab&utm_content=changes&utm_campaign=epl_change_log) can now be found [here at Easy Property Listings](https://easypropertylistings.com.au/change-log/?utm_source=readme&utm_medium=change_log_tab&utm_content=changes&utm_campaign=epl_change_log).
+
+== Upgrade Notice ==
+
+= 3.6 =
+Under offer listings now keep their price visible ("Under Offer | $360,000 - $390,000"), as NSW underquoting rules require from 17 November 2026. To hide it, see Settings > Labels > Under Offer Price Display. Card images are now 600x400: regenerate thumbnails for older images.

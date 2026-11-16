@@ -323,8 +323,14 @@ function epl_get_fallback_content_path() {
  * @since 3.4.41 Fix: Only the default template was loading.
  * @since 3.5.3  Hook to filter find array as well as final template.
  * @since 3.5.11 Pass the original template in the filter.
+ * @since 3.6 Security: refuses template names with ".." or a drive letter, so a shortcode attribute (wrap_template, template) can't include files outside the template folders.
  */
 function epl_get_template_part( $template, $arguments = array(), $default_template = false ) {
+
+	// Template names are relative file names. Refuse "../" and drive paths.
+	if ( 0 !== validate_file( (string) $template ) || ( $default_template && 0 !== validate_file( (string) $default_template ) ) ) {
+		return;
+	}
 
 	$original_template = $template;
 	$base_path         = epl_get_content_path();
@@ -383,6 +389,99 @@ function epl_archive_custom_excerpt_length( $length ) {
  */
 function epl_hide_listing_statuses() {
 	return apply_filters( 'epl_hide_listing_statuses', array( 'withdrawn', 'offmarket', 'deleted' ) );
+}
+
+/**
+ * Is this one of EPL's own listing queries on the front end?
+ *
+ * The listing archives, search results, location, feature and business category pages
+ * (the main query), the EPL shortcodes, the EPL widgets and Elementor Pro Loop Grids that use
+ * an EPL Loop Item. Admin screens, single listings and other plugins' queries (an importer
+ * looking up a listing, for example) are not.
+ *
+ * @param WP_Query $query The query.
+ *
+ * @return bool
+ *
+ * @since 3.6 Added.
+ */
+function epl_is_front_end_listing_query( $query ) {
+	$is = false;
+
+	if ( ! is_admin() && ! $query->is_singular() ) {
+		// EPL shortcodes and widgets, and Elementor Pro Loop Grids using an EPL Loop Item (Elementor draws those cards, so EPL's display check never runs).
+		$is = (bool) $query->get( 'is_epl_shortcode' ) || (bool) $query->get( 'is_epl_widget' ) || (bool) $query->get( 'epl_elementor_loop' );
+
+		if ( ! $is && $query->is_main_query() ) {
+			$is = is_post_type_archive( epl_all_post_types() ) || is_tax( array( 'location', 'tax_feature', 'tax_business_listing' ) ) || epl_is_search();
+		}
+	}
+
+	/**
+	 * Filters whether a query is one of EPL's front end listing queries.
+	 *
+	 * @since 3.6
+	 *
+	 * @param bool     $is    True for EPL archives, search, shortcodes and widgets.
+	 * @param WP_Query $query The query.
+	 */
+	return (bool) apply_filters( 'epl_is_front_end_listing_query', $is, $query );
+}
+
+/**
+ * Leave hidden listings (withdrawn, off market, deleted) out of EPL's listing queries
+ *
+ * Before 3.6 they were only skipped when each listing was shown, so pages showed fewer
+ * listings than they should, and page counts included listings nobody could see. Uses
+ * epl_hide_listing_statuses(), so a site that shows off market listings with that filter
+ * still gets them. Listings with no status are kept, as before.
+ *
+ * @param WP_Query $query The query.
+ *
+ * @return void
+ *
+ * @since 3.6 Added.
+ */
+function epl_exclude_hidden_listing_statuses( $query ) {
+	if ( ! epl_is_front_end_listing_query( $query ) ) {
+		return;
+	}
+
+	$hidden_ids = epl_get_hidden_listing_ids();
+	if ( empty( $hidden_ids ) ) {
+		return;
+	}
+
+	$not_in = $query->get( 'post__not_in' );
+	$not_in = is_array( $not_in ) ? $not_in : array();
+
+	$query->set( 'post__not_in', array_values( array_unique( array_merge( array_map( 'absint', $not_in ), $hidden_ids ) ) ) );
+}
+add_action( 'pre_get_posts', 'epl_exclude_hidden_listing_statuses', 20 );
+
+/**
+ * IDs of listings with a hidden status (epl_hide_listing_statuses())
+ *
+ * One query on the status meta key, kept in the listing query cache until a listing
+ * changes. Excluding these IDs is fast: a meta_query "status NOT IN, or no status" joins
+ * every meta row of every listing (15 seconds on 735 rentals, much longer at 100,000).
+ *
+ * @return int[]
+ *
+ * @since 3.6 Added.
+ */
+function epl_get_hidden_listing_ids() {
+	global $wpdb;
+
+	$hidden = array_values( array_filter( array_map( 'strval', (array) epl_hide_listing_statuses() ) ) );
+	if ( empty( $hidden ) ) {
+		return array();
+	}
+
+	$placeholders = implode( ', ', array_fill( 0, count( $hidden ), '%s' ) );
+	$sql          = $wpdb->prepare( "SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'property_status' AND meta_value IN ( $placeholders )", $hidden ); // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	return array_map( 'absint', epl_listing_query_cache( $sql ) );
 }
 
 /**
@@ -765,6 +864,7 @@ function epl_property_get_the_full_address() {
  * @since 3.4.8 Corrected separator location to appear AFTER the street name and options to control display.
  * @since 3.4.9 Added option allowing passing of $full parameter as false to restrict output to street items only.
  * @since 3.5.14 Corrected escaping function to esc_html.
+ * @since 3.6 Uses the listing's address rules (show_street_address(), show_suburb(), show_address_city(), show_address_country()). Fix: commercial land listings now hide the suburb when Display Street Address and Display Suburb are both unticked, as commercial and business listings do.
  */
 function epl_property_the_address( $full = true, $street_separator = true, $separator_symbol = ',' ) {
 
@@ -779,7 +879,7 @@ function epl_property_the_address( $full = true, $street_separator = true, $sepa
 	$epl_property_address_separator_city   = apply_filters( 'epl_property_address_separator_city', false );
 
 	?>
-	<?php if ( 'yes' === $property->get_property_meta( 'property_address_display' ) ) { ?>
+	<?php if ( $property->show_street_address() ) { ?>
 		<span class="item-street"><?php echo wp_kses_post( $property->get_formatted_property_address( $street_separator, $separator_symbol ) ); ?></span>
 	<?php } ?>
 
@@ -788,16 +888,7 @@ function epl_property_the_address( $full = true, $street_separator = true, $sepa
 		?>
 		<span class="entry-title-sub">
 			<?php
-			if ( 'commercial' === $property->post_type || 'business' === $property->post_type ) {
-				if ( 'yes' === $property->get_property_meta( 'property_com_display_suburb' ) || 'yes' === $property->get_property_meta( 'property_address_display' ) ) {
-					?>
-					<span class="item-suburb"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></span>
-					<?php
-					if ( true === $epl_property_address_separator_suburb && strlen( trim( $property->get_property_meta( 'property_address_suburb' ) ) ) ) {
-						echo '<span class="item-separator">' . esc_html( $epl_property_address_separator ) . '</span>';
-					}
-				}
-			} else {
+			if ( $property->show_suburb() ) {
 				?>
 				<span class="item-suburb"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></span>
 				<?php
@@ -808,7 +899,7 @@ function epl_property_the_address( $full = true, $street_separator = true, $sepa
 			?>
 
 			<?php
-			if ( 'yes' === $property->get_epl_settings( 'epl_enable_city_field' ) ) {
+			if ( $property->show_address_city() ) {
 				?>
 				<span class="item-city"><?php echo esc_html( $property->get_property_meta( 'property_address_city' ) ); ?></span>
 				<?php
@@ -820,7 +911,7 @@ function epl_property_the_address( $full = true, $street_separator = true, $sepa
 			<span class="item-state"><?php echo esc_html( $property->get_property_meta( 'property_address_state' ) ); ?></span>
 			<span class="item-pcode"><?php echo esc_html( $property->get_property_meta( 'property_address_postal_code' ) ); ?></span>
 			<?php
-			if ( 'yes' === $property->get_epl_settings( 'epl_enable_country_field' ) ) {
+			if ( $property->show_address_country() ) {
 				?>
 				<span class="item-country"><?php echo esc_html( $property->get_property_meta( 'property_address_country' ) ); ?></span>
 				<?php
@@ -837,20 +928,26 @@ add_action( 'epl_property_address', 'epl_property_the_address', 10, 3 );
 /**
  * Suburb Name Kept for listing templates extensions which use this function
  *
+ * Shows the suburb, or the city, state and postcode when the listing hides its suburb.
+ *
  * @since 1.3
  * @since 3.1.18 Revised.
  * @since 3.5.14 Corrected escaping function to esc_html.
+ * @since 3.6 Uses the listing's show_suburb() rule. Fix: a commercial or business listing showing its street address now shows its suburb even when Display Suburb is unticked, and commercial land listings follow Display Suburb, the same as epl_property_the_address().
  */
 function epl_property_suburb() {
 	global $property;
-	// Commercial and Business Address.
-	if ( 'commercial' === $property->post_type || 'business' === $property->post_type ) {
+
+	if ( $property->show_suburb() ) {
+		?>
+		<span class="entry-title-sub">
+			<span class="item-suburb"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></span>
+		</span>
+		<?php
+	} else {
 		?>
 
 		<span class="entry-title-sub">
-			<?php if ( 'yes' === $property->get_property_meta( 'property_com_display_suburb' ) ) { ?>
-				<span class="item-suburb"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></span>
-			<?php } else { ?>
 				<?php $prop_addr_city = $property->get_property_meta( 'property_address_city' ); ?>
 				<?php if ( ! empty( $prop_addr_city ) ) { ?>
 					<span class="item-city"><?php echo esc_html( $property->get_property_meta( 'property_address_city' ) ) . ' '; ?></span>
@@ -858,15 +955,8 @@ function epl_property_suburb() {
 
 				<span class="item-state"><?php echo esc_html( $property->get_property_meta( 'property_address_state' ) ) . ' '; ?></span>
 				<span class="item-pcode"><?php echo esc_html( $property->get_property_meta( 'property_address_postal_code' ) ); ?></span>
-			<?php } ?>
 		</span>
 
-		<?php
-	} else {
-		?>
-		<span class="entry-title-sub">
-			<span class="item-suburb"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></span>
-		</span>
 		<?php
 	}
 }
@@ -1178,10 +1268,12 @@ add_action( 'epl_property_category', 'epl_property_category', 10, 2 );
  * @return string
  *
  * @since 3.3.0
+ * @since 3.6 Fix: PHP 8.1+ deprecation notice when the listing has no video URL (null).
  */
 function epl_get_video_host( $url ) {
 
 	$host = 'unknown';
+	$url  = (string) $url;
 
 	if ( strpos( $url, 'youtu' ) > 0 ) {
 		$host = 'youtube';
@@ -1664,65 +1756,27 @@ function epl_get_property_price() {
  * @param      string $d_suburb  The d suburb.
  * @param      string $d_street  The d street.
  * @since 3.5.29 Fix PHP 8.1 deprecation when the meta value is empty.
+ * @since 3.6 Uses the listing's show_suburb() and show_street_address() rules. Fix: a commercial or business listing showing its street address now shows its suburb even when Display Suburb is unticked, and commercial land listings follow Display Suburb, the same as epl_property_the_address().
  */
 function epl_widget_listing_address( $d_suburb = '', $d_street = '' ) {
 	global $property;
-	if ( 'commercial' === $property->post_type || 'business' === $property->post_type ) {
-		// Address Display not Commercial or Business type.
-		if ( 'yes' === $property->get_property_meta( 'property_address_display' ) ) {
-			?>
-			<?php
-			// Suburb.
-			if ( 'on' === $d_suburb && 'yes' === $property->get_property_meta( 'property_com_display_suburb' ) ) {
-				?>
-				<div class="property-meta suburb-name"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></div>
-			<?php } ?>
 
-			<?php
-			// Street.
-			if ( 'on' === $d_street ) {
-				?>
-				<div class="property-meta street-name"><?php echo wp_kses_post( $property->get_formatted_property_address() ); ?></div>
-			<?php } ?>
-		<?php } else { ?>
-			<?php
-			// Suburb.
-			if ( 'on' === $d_suburb && 'yes' === $property->get_property_meta( 'property_com_display_suburb' ) ) {
-				?>
-				<div class="property-meta suburb-name"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></div>
-			<?php } ?>
-			<?php
+	// Suburb.
+	if ( 'on' === $d_suburb && $property->show_suburb() ) {
+		$suburb = $property->get_property_meta( 'property_address_suburb' );
+		if ( null === $suburb ) {
+			$suburb = '';
 		}
-	} else {
-		// Address Display not Commercial or Business type.
-		if ( 'yes' === $property->get_property_meta( 'property_address_display' ) ) {
-			?>
-			<?php
-			// Suburb.
-			if ( 'on' === $d_suburb ) {
-				?>
-				<div class="property-meta suburb-name"><?php echo esc_html( $property->get_property_meta( 'property_address_suburb' ) ); ?></div>
-			<?php } ?>
+		?>
+		<div class="property-meta suburb-name"><?php echo esc_html( $suburb ); ?></div>
+		<?php
+	}
 
-			<?php
-			// Street.
-			if ( 'on' === $d_street ) {
-				?>
-				<div class="property-meta street-name"><?php echo wp_kses_post( $property->get_formatted_property_address() ); ?></div>
-			<?php } ?>
-		<?php } else { ?>
-			<?php
-			// Suburb.
-			if ( 'on' === $d_suburb ) {
-				$suburb = $property->get_property_meta( 'property_address_suburb' );
-				if ( null === $suburb ) {
-					$suburb = '';
-				}
-				?>
-				<div class="property-meta suburb-name"><?php echo wp_kses_post( $suburb ); ?></div>
-			<?php } ?>
-			<?php
-		}
+	// Street.
+	if ( 'on' === $d_street && $property->show_street_address() ) {
+		?>
+		<div class="property-meta street-name"><?php echo wp_kses_post( $property->get_formatted_property_address() ); ?></div>
+		<?php
 	}
 }
 
@@ -2075,11 +2129,67 @@ function epl_add_or_update_params( $url, $key, $value ) {
 }
 
 /**
+ * Query arguments for a sorter from epl_sorting_options()
+ *
+ * Adds tiebreakers so listings with the same value (the same status, suburb, price or post
+ * date) come back in a fixed order. Without them MySQL returns ties in any order, so a
+ * listing can show on two pages, or on none, when paging through sorted results. Meta and
+ * title sorts break ties by newest first, then ID. Date sorts break ties by ID in the same
+ * direction. A random sort, or a sorter whose orderby already lists several keys, is used
+ * as is.
+ *
+ * @param array $sorter A sorter: type (meta or post), key, order and, for meta, orderby.
+ *
+ * @return array WP_Query arguments: orderby, order and, for meta sorters, meta_key.
+ *
+ * @since 3.6
+ */
+function epl_get_sorter_query_args( $sorter ) {
+	$order   = isset( $sorter['order'] ) && 'ASC' === strtoupper( $sorter['order'] ) ? 'ASC' : 'DESC';
+	$is_meta = isset( $sorter['type'] ) && 'meta' === $sorter['type'];
+	$key     = isset( $sorter['key'] ) ? $sorter['key'] : '';
+	$primary = $is_meta ? ( isset( $sorter['orderby'] ) ? $sorter['orderby'] : 'meta_value' ) : $key;
+
+	$args = array( 'order' => $order );
+
+	if ( $is_meta ) {
+		$args['meta_key'] = $key; //phpcs:ignore
+	}
+
+	if ( ! is_string( $primary ) || '' === $primary || false !== strpos( trim( $primary ), ' ' ) || in_array( $primary, array( 'rand', 'none' ), true ) || 0 === strpos( $primary, 'RAND(' ) ) {
+		$args['orderby'] = $primary;
+		return $args;
+	}
+
+	$orderby = array( $primary => $order );
+
+	if ( in_array( $primary, array( 'date', 'post_date' ), true ) ) {
+		$orderby['ID'] = $order;
+	} elseif ( 'ID' !== $primary ) {
+		$orderby['date'] = 'DESC';
+		$orderby['ID']   = 'DESC';
+	}
+
+	/**
+	 * Filters the orderby array, primary sort first, then the tiebreakers.
+	 *
+	 * @since 3.6
+	 *
+	 * @param array $orderby Orderby => order pairs.
+	 * @param array $sorter  The sorter.
+	 */
+	$args['orderby'] = apply_filters( 'epl_sorter_orderby', $orderby, $sorter );
+
+	return $args;
+}
+
+/**
  * Archive Sorting
  *
  * @param  WP_Query $query  The query.
  *
  * @since  2.0
+ * @since  3.6 Sorting has tiebreakers (epl_get_sorter_query_args()), so listings with the same value don't repeat or go missing across pages.
  */
 function epl_archive_sorting( $query ) {
 	$post_types_sold   = array( 'property', 'land', 'commercial', 'business', 'commercial_land', 'location_profile', 'rural' );
@@ -2100,13 +2210,9 @@ function epl_archive_sorting( $query ) {
 
 				if ( $orderby === $sorter['id'] ) {
 
-					if ( 'meta' === $sorter['type'] ) {
-						$query->set( 'orderby', $sorter['orderby'] );
-						$query->set( 'meta_key', $sorter['key'] );
-					} else {
-						$query->set( 'orderby', $sorter['key'] );
+					foreach ( epl_get_sorter_query_args( $sorter ) as $arg => $value ) {
+						$query->set( $arg, $value );
 					}
-					$query->set( 'order', $sorter['order'] );
 					break;
 				}
 			}
@@ -2273,6 +2379,7 @@ add_action( 'epl_archive_utility_wrap_end', 'epl_archive_utility_wrap_after' );
  *
  * @since 1.0
  * @since 3.3 Revised.
+ * @since 3.6 New filter epl_property_gallery_html: an add-on can supply the whole gallery HTML (for example CDN-hosted images not in the media library).
  */
 function epl_property_gallery() {
 
@@ -2281,6 +2388,22 @@ function epl_property_gallery() {
 	$d_gallery_n = epl_get_option( 'display_gallery_n' );
 
 	if ( 1 !== $d_gallery ) {
+		return;
+	}
+
+	/**
+	 * Allow an extension to fully supply the gallery HTML (e.g. CDN-hosted images
+	 * that are not in the WP media library). Return a string to short-circuit the
+	 * default attachment-based gallery; return null to leave default behaviour.
+	 *
+	 * @since 3.6
+	 *
+	 * @param string|null $custom  Custom gallery HTML, or null for default.
+	 * @param int         $post_id Current listing ID.
+	 */
+	$custom = apply_filters( 'epl_property_gallery_html', null, get_the_ID() );
+	if ( null !== $custom ) {
+		echo $custom; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		return;
 	}
 
@@ -3165,6 +3288,8 @@ function epl_esc_attr( $value ) {
  *
  * @since      2.2.0
  * @since      3.4.38 PHP 8.0 fix.
+ * @since      3.5.29 Fix: SQL injection. Post types are limited to registered ones and passed as prepared placeholders.
+ * @since      3.6 Fix: Slow query. The second agent meta is only joined when counting an author's listings, on the property_second_agent key, instead of every meta row of every listing.
  */
 function epl_get_post_count( $type, $meta_key, $meta_value, $author_id = '' ) {
 	global $wpdb;
@@ -3192,9 +3317,8 @@ function epl_get_post_count( $type, $meta_key, $meta_value, $author_id = '' ) {
 		$user_info  = get_userdata( $author_id );
 		$user_login = $user_info ? $user_info->user_login : '';
 
-		$where[]        = '( p.post_author = %d OR ( pm2.meta_key = %s AND pm2.meta_value = %s ) )';
+		$where[]        = '( p.post_author = %d OR pm2.meta_value = %s )';
 		$prepare_args[] = $author_id;
-		$prepare_args[] = 'property_second_agent';
 		$prepare_args[] = $user_login;
 	}
 
@@ -3204,11 +3328,15 @@ function epl_get_post_count( $type, $meta_key, $meta_value, $author_id = '' ) {
 	$where[]        = 'pm.meta_value = %s';
 	$prepare_args[] = $meta_value;
 
+	// The second agent is only joined when counting an author's listings, on its own key.
+	// Joining every meta row of every listing made this count slow.
+	$second_agent_join = empty( $author_id ) ? '' : "LEFT JOIN {$wpdb->postmeta} pm2 ON ( p.ID = pm2.post_id AND pm2.meta_key = 'property_second_agent' )";
+
 	$sql = "
 		SELECT count( Distinct p.ID ) AS count
 		FROM {$wpdb->posts} AS p
 		INNER JOIN {$wpdb->postmeta} pm  ON (p.ID = pm.post_id)
-		INNER JOIN {$wpdb->postmeta} pm2  ON (p.ID = pm2.post_id)
+		{$second_agent_join}
 		WHERE " . implode( ' AND ', $where );
 
 	$count = $wpdb->get_row( $wpdb->prepare( $sql, $prepare_args ) ); //phpcs:ignore
@@ -3292,6 +3420,44 @@ function epl_count_total_contacts() {
 }
 
 /**
+ * The comment_agent labels EPL saves on contact notes and activities.
+ *
+ * Contact notes, calls, emails and other activities are stored as comments on
+ * the listing they relate to. They are private CRM records, never comments.
+ *
+ * @return array
+ * @since 3.6 Added so every check uses the same labels: 'easy-property-listings' since 3.0, 'epl' on older notes.
+ */
+function epl_contact_note_agents() {
+	return array( 'easy-property-listings', 'epl' );
+}
+
+/**
+ * Is this comment an EPL contact note or activity?
+ *
+ * @param WP_Comment|object $comment The comment.
+ *
+ * @return bool
+ * @since 3.6 Added.
+ */
+function epl_is_contact_note( $comment ) {
+	return isset( $comment->comment_agent ) && in_array( $comment->comment_agent, epl_contact_note_agents(), true );
+}
+
+/**
+ * Can the current request see contact notes in comment lists?
+ *
+ * Staff in wp-admin can. Everywhere else (the front end, feeds, the REST API,
+ * visitors' AJAX requests) contact notes are left out.
+ *
+ * @return bool
+ * @since 3.6 Added.
+ */
+function epl_can_see_contact_notes() {
+	return is_admin() && current_user_can( 'edit_posts' );
+}
+
+/**
  * Hide contacts notes from showing on frontend
  *
  * @param      array  $comments  The comments.
@@ -3299,16 +3465,70 @@ function epl_count_total_contacts() {
  *
  * @return     array
  * @since      3.0
+ * @since      3.6 Fix: matched only the old 'epl' label, so notes saved as 'easy-property-listings' were not hidden.
  */
 function epl_filter_listing_comments_array( $comments, $post_id ) {
-	foreach ( $comments as $key   => &$comment ) {
-		if ( 'epl' === $comment->comment_agent ) {
+	foreach ( $comments as $key => $comment ) {
+		if ( epl_is_contact_note( $comment ) ) {
 			unset( $comments[ $key ] );
 		}
 	}
 	return $comments;
 }
 add_filter( 'comments_array', 'epl_filter_listing_comments_array', 10, 2 );
+
+/**
+ * SQL that leaves EPL contact notes out of a comment query.
+ *
+ * @return string
+ * @since 3.6 Added.
+ */
+function epl_exclude_contact_notes_sql() {
+	global $wpdb;
+
+	$agents       = epl_contact_note_agents();
+	$placeholders = implode( ', ', array_fill( 0, count( $agents ), '%s' ) );
+
+	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	return $wpdb->prepare( " AND {$wpdb->comments}.comment_agent NOT IN ( $placeholders )", $agents );
+}
+
+/**
+ * Leave contact notes out of comment queries outside wp-admin.
+ *
+ * Covers comment lists, the Recent Comments widget and the REST API. EPL's own
+ * contact screens ask for notes by contact (meta key epl_contact_id) and still get them.
+ *
+ * @param array            $clauses The query clauses.
+ * @param WP_Comment_Query $query   The comment query.
+ *
+ * @return array
+ * @since 3.6 Added: contact notes and activities showed in public comment lists.
+ */
+function epl_hide_contact_notes_from_comment_queries( $clauses, $query ) {
+	$asks_for_a_contacts_notes = isset( $query->query_vars['meta_key'] ) && 'epl_contact_id' === $query->query_vars['meta_key'];
+
+	if ( epl_can_see_contact_notes() || $asks_for_a_contacts_notes ) {
+		return $clauses;
+	}
+
+	$clauses['where'] .= epl_exclude_contact_notes_sql();
+	return $clauses;
+}
+add_filter( 'comments_clauses', 'epl_hide_contact_notes_from_comment_queries', 10, 2 );
+
+/**
+ * Leave contact notes out of the comment RSS feeds.
+ *
+ * @param string $where The feed's WHERE clause.
+ *
+ * @return string
+ * @since 3.6 Added: contact notes and activities showed in the comment feeds.
+ */
+function epl_hide_contact_notes_from_comment_feeds( $where ) {
+	return $where . epl_exclude_contact_notes_sql();
+}
+add_filter( 'comment_feed_where', 'epl_hide_contact_notes_from_comment_feeds' );
 
 /**
  * Archive Page Title
@@ -3357,6 +3577,7 @@ add_action( 'epl_the_archive_title', 'epl_archive_title_callback' );
  *
  * @since      3.0
  * @since      3.4.44 Option sortby based on instance_id now.
+ * @since      3.6 Sorting has tiebreakers (epl_get_sorter_query_args()), so listings with the same value don't repeat or go missing across pages.
  */
 function epl_add_orderby_args( $args, $type = '', $name = '' ) {
 
@@ -3384,13 +3605,7 @@ function epl_add_orderby_args( $args, $type = '', $name = '' ) {
 
 			if ( $orderby === $sorter['id'] ) {
 
-				if ( 'meta' === $sorter['type'] ) {
-					$args['orderby']  = $sorter['orderby'];
-					$args['meta_key'] = $sorter['key']; //phpcs:ignore
-				} else {
-					$args['orderby'] = $sorter['key'];
-				}
-				$args['order'] = $sorter['order'];
+				$args = array_merge( $args, epl_get_sorter_query_args( $sorter ) );
 				break;
 			}
 		}
@@ -3406,16 +3621,25 @@ function epl_add_orderby_args( $args, $type = '', $name = '' ) {
  * @since 3.1.5
  * @since 3.4.48 Added new class for the message removed incorrect class name.
  * @since 3.5 Tweak: Shortcode results message allow basic html.
+ * @since 3.6 The title filters receive the shortcode. New epl_shortcode_results_message_text filter adds a line under the title (empty by default, so output is unchanged) and epl_shortcode_results_message_html filters the whole message.
  */
 function epl_shortcode_results_message_callback( $shortcode = 'default' ) {
 
-	$title = apply_filters( 'epl_shortcode_results_message_title', __( 'Nothing found, please check back later.', 'easy-property-listings' ) );
+	$title = apply_filters( 'epl_shortcode_results_message_title', __( 'Nothing found, please check back later.', 'easy-property-listings' ), $shortcode );
 
 	if ( 'open' === $shortcode ) {
-		$title = apply_filters( 'epl_shortcode_results_message_title_open', __( 'Nothing currently scheduled for inspection, please check back later.', 'easy-property-listings' ) );
+		$title = apply_filters( 'epl_shortcode_results_message_title_open', __( 'Nothing currently scheduled for inspection, please check back later.', 'easy-property-listings' ), $shortcode );
 	}
 
-	echo '<h3 class="epl-alert epl-shortcode-results-message epl-shortcode-results-message-' . esc_attr( $shortcode ) . '">' . wp_kses_post( $title ) . '</h3>';
+	$text = apply_filters( 'epl_shortcode_results_message_text', '', $shortcode );
+
+	$html = '<h3 class="epl-alert epl-shortcode-results-message epl-shortcode-results-message-' . esc_attr( $shortcode ) . '">' . wp_kses_post( $title ) . '</h3>';
+
+	if ( '' !== (string) $text ) {
+		$html .= '<p class="epl-shortcode-results-message-text epl-shortcode-results-message-text-' . esc_attr( $shortcode ) . '">' . wp_kses_post( $text ) . '</p>';
+	}
+
+	echo wp_kses_post( apply_filters( 'epl_shortcode_results_message_html', $html, $shortcode, $title, $text ) );
 }
 add_action( 'epl_shortcode_results_message', 'epl_shortcode_results_message_callback' );
 
@@ -3455,6 +3679,7 @@ add_action( 'epl_property_search_not_found', 'epl_property_search_not_found_call
  *
  * @since 3.1.16
  * @since 3.4.23 Added compatibility class.
+ * @since 3.6 Added epl-status-auction for listings with an auction authority (commercial uses the commercial authority).
  */
 function epl_property_post_class_listing_status_callback( $classes ) {
 
@@ -3463,6 +3688,7 @@ function epl_property_post_class_listing_status_callback( $classes ) {
 		$property_status      = get_property_meta( 'property_status' );
 		$property_under_offer = get_property_meta( 'property_under_offer' );
 		$commercial_type      = get_property_meta( 'property_com_listing_type' );
+		$authority            = 'commercial' === get_post_type() ? get_property_meta( 'property_com_authority' ) : get_property_meta( 'property_authority' );
 		$class_prefix         = 'epl-status-';
 
 		if ( ! empty( $property_status ) ) {
@@ -3470,6 +3696,9 @@ function epl_property_post_class_listing_status_callback( $classes ) {
 		}
 		if ( 'yes' === $property_under_offer && 'sold' !== $property_status ) {
 			$classes[] = $class_prefix . 'under-offer';
+		}
+		if ( 'auction' === $authority ) {
+			$classes[] = $class_prefix . 'auction';
 		}
 		if ( ! empty( $commercial_type ) ) {
 			$class_prefix = 'epl-commercial-type-';

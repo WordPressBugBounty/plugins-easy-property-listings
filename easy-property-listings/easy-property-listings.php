@@ -5,7 +5,7 @@
  * Description:  Fast. Flexible. Forward-thinking solution for real estate agents using WordPress. Easy Property Listing is one of the most dynamic and feature rich Real Estate plugin for WordPress available on the market today. Built for scale, contact generation and works with any theme!
  * Author: Merv Barrett
  * Author URI: https://www.realestateconnected.com.au/
- * Version: 3.5.29
+ * Version: 3.6
  * Text Domain: easy-property-listings
  * Domain Path: /languages
  * License: GPLv2 or later
@@ -27,7 +27,7 @@
  * @package EPL
  * @category Core
  * @author Merv Barrett
- * @version 3.5.29
+ * @version 3.6
  */
 
 // Exit if accessed directly.
@@ -120,7 +120,7 @@ if ( ! class_exists( 'Easy_Property_Listings' ) ) :
 		public function setup_constants() {
 			// Plugin version.
 			if ( ! defined( 'EPL_PROPERTY_VER' ) ) {
-				define( 'EPL_PROPERTY_VER', '3.5.29' );
+				define( 'EPL_PROPERTY_VER', '3.6' );
 			}
 			// Plugin DB version.
 			if ( ! defined( 'EPL_PROPERTY_DB_VER' ) ) {
@@ -190,6 +190,7 @@ if ( ! class_exists( 'Easy_Property_Listings' ) ) :
 		 *
 		 * @access private
 		 * @since 1.0.0
+		 * @since 3.6 Loads the admin messages (class-epl-admin-messages.php), the [listing] shortcode class (class-epl-shortcode-listing.php) and the Elementor widgets (beta).
 		 * @return void
 		 */
 		private function includes() {
@@ -290,6 +291,7 @@ if ( ! class_exists( 'Easy_Property_Listings' ) ) :
 
 			if ( is_admin() ) {
 				require_once EPL_PATH_LIB . 'includes/admin/plugins.php';
+				require_once EPL_PATH_LIB . 'includes/admin/class-epl-admin-messages.php';
 				require_once EPL_PATH_LIB . 'includes/class-epl-metabox.php';
 				require_once EPL_PATH_LIB . 'post-types/post-types.php';
 				require_once EPL_PATH_LIB . 'includes/admin/admin-functions.php';
@@ -323,6 +325,7 @@ if ( ! class_exists( 'Easy_Property_Listings' ) ) :
 			require_once EPL_PATH_LIB . 'hooks/hook-energy-certificate.php';
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing-map.php';
 			require_once EPL_PATH_LIB . 'shortcodes/class-epl-advanced-shortcode-listing.php';
+			require_once EPL_PATH_LIB . 'shortcodes/class-epl-shortcode-listing.php';
 			require_once EPL_PATH_LIB . 'shortcodes/class-epl-listing-elements.php';
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing.php';
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing-advanced.php';
@@ -335,6 +338,18 @@ if ( ! class_exists( 'Easy_Property_Listings' ) ) :
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing-auction.php';
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing-results.php';
 			require_once EPL_PATH_LIB . 'shortcodes/shortcode-listing-meta-doc.php';
+
+			/**
+			 * Filters whether the Elementor widgets (beta) load. They only start when Elementor
+			 * 3.5 or later is active. Return false from a must-use plugin to turn them off.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool $enabled True to load the Elementor widgets.
+			 */
+			if ( apply_filters( 'epl_elementor_enabled', true ) ) {
+				require_once EPL_PATH_LIB . 'page-builders/elementor/class-epl-elementor.php';
+			}
 
 			require_once EPL_PATH_LIB . 'includes/install.php';
 			require_once EPL_PATH_LIB . 'includes/class-epl-search-fields.php';

@@ -268,11 +268,24 @@ class EPL_SEARCH {
 	 * Set post type for query
 	 *
 	 * @since 3.4.12 Added support for 'all' post type.
+	 * @since 3.6 Fix: only searches post types the site shows to visitors. A listing type that's switched off no longer gives PHP warnings (it finds nothing), and private ones like contacts can't be searched from the URL.
 	 */
 	protected function set_post_type() {
 		if ( isset( $this->get_data['post_type'] ) && ! empty( $this->get_data['post_type'] ) && 'all' !== $this->get_data['post_type'] ) {
-			$this->query->set( 'post_type', $this->get_data['post_type'] );
-			$this->post_type = $this->get_data['post_type'];
+			$post_type = $this->get_data['post_type'];
+			$allowed   = array_values( array_filter( (array) $post_type, 'epl_search_can_show_post_type' ) );
+
+			if ( empty( $allowed ) ) {
+				// Nothing the visitor can see: search the active listing types, find nothing.
+				$allowed = array_keys( epl_get_active_post_types() );
+				$this->query->set( 'post__in', array( 0 ) );
+			} elseif ( ! is_array( $post_type ) ) {
+				$allowed = $allowed[0];
+			}
+
+			$this->query->set( 'post_type', $allowed );
+			$this->post_type             = $allowed;
+			$this->get_data['post_type'] = $allowed;
 		} else {
 			$epl_post_types = epl_get_active_post_types();
 			if ( ! empty( $epl_post_types ) ) {
@@ -325,19 +338,34 @@ class EPL_SEARCH {
 	}
 
 	/**
+	 * The requested listing statuses, keeping only real ones (Current, Sold, Leased...).
+	 *
+	 * @since 3.6 New: used for the search form fields, whose queries are cached.
+	 *
+	 * @return string Comma separated statuses, or ''.
+	 */
+	protected function get_field_status() {
+		return epl_search_known_statuses( $this->get_data['property_status'] );
+	}
+
+	/**
 	 * Prepare the query
+	 *
+	 * @since 3.6 Security: the form fields get only real listing statuses, so ?property_status=<anything> can't fill the listing query cache with junk entries. The search itself still uses the value as before.
 	 */
 	protected function prepare_query() {
 
+		$field_status = $this->get_field_status();
+
 		if ( 'commercial' === $this->get_data['post_type'] || 'commercial_land' === $this->get_data['post_type'] ) {
 			if ( function_exists( 'epl_listing_search_commercial_widget_fields_frontend' ) ) {
-				$this->form_fields = epl_listing_search_commercial_widget_fields_frontend( $this->get_data['post_type'], $this->get_data['property_status'], $this->transaction_type );
+				$this->form_fields = epl_listing_search_commercial_widget_fields_frontend( $this->get_data['post_type'], $field_status, $this->transaction_type );
 
 			} else {
-				$this->form_fields = epl_search_widget_fields_frontend( $this->get_data['post_type'], $this->get_data['property_status'], $this->transaction_type );
+				$this->form_fields = epl_search_widget_fields_frontend( $this->get_data['post_type'], $field_status, $this->transaction_type );
 			}
 		} else {
-			$this->form_fields = epl_search_widget_fields_frontend( $this->get_data['post_type'], $this->get_data['property_status'], $this->transaction_type );
+			$this->form_fields = epl_search_widget_fields_frontend( $this->get_data['post_type'], $field_status, $this->transaction_type );
 		}
 
 		foreach ( $this->get_data as $key => $data ) {

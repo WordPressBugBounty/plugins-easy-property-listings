@@ -26,13 +26,14 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * @since 2.2
  * @since 3.5.2 Added check to identify 0 values so that it's not ignored by empty check.
+ * @since 3.6 Fix: a decimal between -1 and 1, such as 0.5, was returned as 0. Only a real 0 is returned as 0 now.
  */
 function epl_get_option( $key = '', $default_val = false ) {
 
 	global $epl_settings;
 
 	// Check for zeros.
-	if ( isset( $epl_settings[ $key ] ) && is_numeric( $epl_settings[ $key ] ) && 0 === (int) $epl_settings[ $key ] ) {
+	if ( isset( $epl_settings[ $key ] ) && is_numeric( $epl_settings[ $key ] ) && 0.0 === (float) $epl_settings[ $key ] ) {
 			$value = 0;
 	} else {
 		// Preserve empty check for rest of the values to preserve the behaviour: if value empty, then return default.
@@ -42,6 +43,66 @@ function epl_get_option( $key = '', $default_val = false ) {
 	$value = apply_filters( 'epl_get_option', $value, $key, $default_val );
 	return apply_filters( 'epl_get_option_' . $key, $value, $key, $default_val );
 }
+
+/**
+ * Get a saved option, keeping saved empty values
+ *
+ * Unlike epl_get_option(), a saved empty value such as '' or an empty array is returned as
+ * saved, so a cleared text field or a checkbox list with nothing ticked stays empty. The
+ * default is returned only when the setting has never been saved. Runs the same
+ * epl_get_option and epl_get_option_{$key} filters as epl_get_option().
+ *
+ * @param string $key         Setting key.
+ * @param mixed  $default_val Returned when the setting has never been saved.
+ *
+ * @return mixed
+ *
+ * @since 3.6
+ */
+function epl_get_saved_option( $key = '', $default_val = false ) {
+
+	$epl_settings = epl_get_settings();
+
+	if ( is_array( $epl_settings ) && isset( $epl_settings[ $key ] ) ) {
+		$value = $epl_settings[ $key ];
+	} else {
+		$value = $default_val;
+	}
+
+	$value = apply_filters( 'epl_get_option', $value, $key, $default_val );
+	return apply_filters( 'epl_get_option_' . $key, $value, $key, $default_val );
+}
+
+/**
+ * Keep the global settings in step with the saved option
+ *
+ * The global $epl_settings is loaded once per request, so without this epl_get_option()
+ * and epl_get_saved_option() return the old values for the rest of the request after
+ * the epl_settings option is saved.
+ *
+ * @param mixed $old_value Previous value (unused).
+ * @param mixed $value     Saved value.
+ *
+ * @since 3.6
+ */
+function epl_refresh_settings_global( $old_value, $value ) {
+	global $epl_settings;
+	$epl_settings = $value;
+}
+add_action( 'update_option_epl_settings', 'epl_refresh_settings_global', 10, 2 );
+
+/**
+ * Keep the global settings in step when the epl_settings option is first added
+ *
+ * @param string $option Option name (unused).
+ * @param mixed  $value  Saved value.
+ *
+ * @since 3.6
+ */
+function epl_refresh_settings_global_on_add( $option, $value ) {
+	epl_refresh_settings_global( null, $value );
+}
+add_action( 'add_option_epl_settings', 'epl_refresh_settings_global_on_add', 10, 2 );
 
 /**
  * Determine if Divi framework is loaded
@@ -424,6 +485,7 @@ function epl_the_address( $before = '', $after = '', $country = false, $echo_out
  * @return string
  * @since 3.3
  * @since 3.4.27 Added support for prefix.
+ * @since 3.6 Uses the listing's show_street_address() and show_suburb() rules. Fix: the suburb of a commercial, commercial land or business listing is left out when Display Street Address and Display Suburb are both unticked, as epl_property_the_address() and the REST API already do.
  */
 function epl_get_the_address( $address_args = array(), $sep = array(), $country = false, $prefix = array() ) {
 
@@ -463,11 +525,17 @@ function epl_get_the_address( $address_args = array(), $sep = array(), $country 
 		$address_args = array_keys( $address_defaults );
 	}
 
+	global $property;
+
 	foreach ( $address_args as $arg ) {
 
 		if ( isset( $address_defaults[ $arg ] ) ) {
 
-			if ( 'yes' !== get_property_meta( 'property_address_display' ) && in_array( $arg, array( 'sub_number', 'lot_number', 'street_number', 'street' ), true ) ) {
+			if ( ! $property->show_street_address() && in_array( $arg, array( 'sub_number', 'lot_number', 'street_number', 'street' ), true ) ) {
+				continue;
+			}
+
+			if ( 'suburb' === $arg && ! $property->show_suburb() ) {
 				continue;
 			}
 
@@ -1019,6 +1087,7 @@ function epl_render_html_fields( $field = array(), $val = '' ) {
  *
  * @since 2.1
  * @since 3.5.3 Updated to return local timestamp.
+ * @since 3.6 Added the Under Offer Price Display setting (display_price_under_offer).
  */
 function epl_get_admin_option_fields() {
 	global $epl_settings;
@@ -1201,6 +1270,18 @@ function epl_get_admin_option_fields() {
 					'label'   => __( 'Under Offer Label', 'easy-property-listings' ),
 					'type'    => 'text',
 					'default' => __( 'Under Offer', 'easy-property-listings' ),
+				),
+
+				array(
+					'name'    => 'display_price_under_offer',
+					'label'   => __( 'Under Offer Price Display', 'easy-property-listings' ),
+					'type'    => 'radio',
+					'opts'    => array(
+						'yes' => __( 'Show the price', 'easy-property-listings' ),
+						'no'  => __( 'Hide the price', 'easy-property-listings' ),
+					),
+					'default' => 'yes',
+					'help'    => __( 'Example: Under Offer | $500,000', 'easy-property-listings' ) . ' <a href="' . esc_url( 'https://codex.easypropertylistings.com.au/article/626-under-offer-price-display' ) . '" target="_blank">' . __( 'Read More', 'easy-property-listings' ) . '</a>',
 				),
 
 				array(
@@ -1754,6 +1835,97 @@ function epl_get_admin_option_fields() {
 
 	);
 
+	if ( did_action( 'elementor/loaded' ) ) {
+		// One "archive page" dropdown per active listing type, so each type can
+		// use its own Elementor archive design. Blank = fall back to the single
+		// site-wide "Listings Archive Page" chosen above.
+		$epl_archive_type_fields = array();
+		$epl_archive_type_opts   = array( '' => __( 'Use Default', 'easy-property-listings' ) ) + $opts_pages;
+
+		foreach ( epl_get_active_post_types() as $epl_archive_type => $epl_archive_type_label ) {
+			$epl_archive_type_fields[] = array(
+				'name'    => 'epl_archive_page_id_' . $epl_archive_type,
+				/* translators: %s: listing type label, e.g. Residential. */
+				'label'   => sprintf( __( '%s Archive Page', 'easy-property-listings' ), $epl_archive_type_label ),
+				'type'    => 'select',
+				'opts'    => $epl_archive_type_opts,
+				'default' => '',
+			);
+		}
+
+		$fields[] = array(
+			'label'  => __( 'Elementor Templates', 'easy-property-listings' ),
+			'class'  => 'core',
+			'id'     => 'elementor-templates',
+			'help'   => __( 'Design listing pages in Elementor (beta).', 'easy-property-listings' ) . ' <a href="' . esc_url( 'https://codex.easypropertylistings.com.au/article/676-elementor-templates-settings' ) . '" target="_blank">' . __( 'Read More', 'easy-property-listings' ) . '</a><hr/>',
+			'fields' => array_merge( array(
+				array(
+					'type'    => 'help',
+					'name'    => 'epl_elementor_templates_help',
+					'content' => sprintf(
+						'<p><a class="button" href="%1$s" target="_blank">%2$s</a> &nbsp; <a class="button" href="%3$s" target="_blank">%4$s</a></p>',
+						esc_url( admin_url( 'edit.php?post_type=elementor_library&elementor_library_type=epl-single' ) ),
+						esc_html__( 'View Single Listing Templates', 'easy-property-listings' ),
+						esc_url( admin_url( 'edit.php?post_type=elementor_library&elementor_library_type=epl-loop-card' ) ),
+						esc_html__( 'View Listing Card Templates', 'easy-property-listings' )
+					),
+				),
+
+				array(
+					'name'    => 'epl_archive_page_enabled',
+					'label'   => __( 'Use An Elementor Page As The Archive', 'easy-property-listings' ),
+					'type'    => 'radio',
+					'opts'    => array(
+						'yes' => __( 'Enable', 'easy-property-listings' ),
+						'no'  => __( 'Disable', 'easy-property-listings' ),
+					),
+					'default' => 'no',
+					'help'    => __( 'Show your Elementor page instead of the listings archive.', 'easy-property-listings' ),
+				),
+
+				array(
+					'name'    => 'epl_archive_page_id',
+					'label'   => __( 'Listings Archive Page', 'easy-property-listings' ),
+					'type'    => 'select',
+					'opts'    => $opts_pages,
+					'default' => '',
+					'help'    => __( 'The page needs the Listings Results widget.', 'easy-property-listings' ),
+				),
+
+				array(
+					'type'    => 'help',
+					'name'    => 'epl_archive_page_per_type_help',
+					'content' => '<hr/><p><strong>' . esc_html__( 'Per Listing Type Archive Pages', 'easy-property-listings' ) . '</strong><br/>'
+						. esc_html__( 'Optional.', 'easy-property-listings' ) . '</p>',
+				),
+			),
+			$epl_archive_type_fields,
+			array(
+				array(
+					'name'    => 'epl_archive_page_apply_search',
+					'label'   => __( 'Apply To Search Results', 'easy-property-listings' ),
+					'type'    => 'radio',
+					'opts'    => array(
+						'yes' => __( 'Enable', 'easy-property-listings' ),
+						'no'  => __( 'Disable', 'easy-property-listings' ),
+					),
+					'default' => 'yes',
+				),
+
+				array(
+					'name'    => 'epl_archive_page_apply_taxonomy',
+					'label'   => __( 'Apply To Location/Feature Archives', 'easy-property-listings' ),
+					'type'    => 'radio',
+					'opts'    => array(
+						'yes' => __( 'Enable', 'easy-property-listings' ),
+						'no'  => __( 'Disable', 'easy-property-listings' ),
+					),
+					'default' => 'yes',
+				),
+			) ),
+		);
+	}
+
 	if ( defined( 'EPL_BETA_VERSIONS' ) && true === EPL_BETA_VERSIONS ) {
 		$fields[] = array(
 			'label'  => __( 'Beta Versions', 'easy-property-listings' ),
@@ -1816,6 +1988,400 @@ function epl_leased_label_status_filter_callback() {
 add_filter( 'epl_leased_label_status_filter', 'epl_leased_label_status_filter_callback' );
 
 /**
+ * Run a listing query, with its result cached across page loads
+ *
+ * For queries whose results only change when listings change, such as the values in the
+ * search dropdowns. The result is remembered for the rest of the page load and saved as a
+ * transient for 12 hours (filter epl_listing_query_cache_expiration).
+ *
+ * When listings change, visitors keep getting the cached results while a background job
+ * (WP-Cron) rebuilds every query visitors have used, then the site switches to the new
+ * results, so no visitor waits for the rebuild. If the rebuild hasn't run within 10 minutes
+ * (filter epl_listing_query_cache_stale_limit), the next page load rebuilds as it goes.
+ *
+ * @param string $sql         A prepared SQL query.
+ * @param string $return_type col for $wpdb->get_col(), results for $wpdb->get_results().
+ *
+ * @return array
+ *
+ * @since 3.6
+ */
+function epl_listing_query_cache( $sql, $return_type = 'col' ) {
+	static $memory  = array();
+	static $checked = false;
+
+	$key = md5( $return_type . '|' . $sql );
+
+	if ( isset( $memory[ $key ] ) ) {
+		return $memory[ $key ];
+	}
+
+	/**
+	 * Filters whether listing query results are cached across page loads.
+	 *
+	 * @since 3.6
+	 *
+	 * @param bool $enabled Default true.
+	 */
+	$enabled = (bool) apply_filters( 'epl_listing_query_cache_enabled', true );
+
+	if ( ! $enabled ) {
+		$memory[ $key ] = epl_listing_query_run( $sql, $return_type );
+		return $memory[ $key ];
+	}
+
+	// Listings changed and the background rebuild hasn't run in time: stop serving old results.
+	if ( ! $checked ) {
+		$checked = true;
+		$stale   = (int) get_option( 'epl_listing_query_cache_stale', 0 );
+
+		/**
+		 * Filters how long old results may be served after listings change, in seconds,
+		 * while waiting for the background rebuild.
+		 *
+		 * @since 3.6
+		 *
+		 * @param int $limit Default 10 minutes.
+		 */
+		if ( $stale && time() - $stale > (int) apply_filters( 'epl_listing_query_cache_stale_limit', 10 * MINUTE_IN_SECONDS ) ) {
+			epl_flush_listing_query_cache( true );
+		}
+	}
+
+	$transient = epl_listing_query_cache_transient( $key );
+	$result    = get_transient( $transient );
+
+	if ( ! is_array( $result ) ) {
+		$result = epl_listing_query_run( $sql, $return_type );
+		set_transient( $transient, $result, epl_listing_query_cache_expiration() );
+		epl_listing_query_cache_remember( $key, $sql, $return_type );
+	}
+
+	$memory[ $key ] = $result;
+
+	return $result;
+}
+
+/**
+ * Run a listing query without the cache
+ *
+ * @param string $sql         A prepared SQL query.
+ * @param string $return_type col or results.
+ *
+ * @return array
+ *
+ * @since 3.6
+ */
+function epl_listing_query_run( $sql, $return_type = 'col' ) {
+	global $wpdb;
+
+	$result = 'results' === $return_type ? $wpdb->get_results( $sql ) : $wpdb->get_col( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $sql is prepared by the caller.
+
+	return is_array( $result ) ? $result : array();
+}
+
+/**
+ * Transient name for a cached listing query
+ *
+ * @param string   $key     Query key (md5 of the return type and SQL).
+ * @param int|null $version Cache version, the current one by default.
+ *
+ * @return string
+ *
+ * @since 3.6
+ */
+function epl_listing_query_cache_transient( $key, $version = null ) {
+	if ( null === $version ) {
+		$version = (int) get_option( 'epl_listing_query_cache_version', 1 );
+	}
+	return 'epl_lqc_' . md5( $version . '|' . $key );
+}
+
+/**
+ * How long listing query results are cached, in seconds
+ *
+ * @return int
+ *
+ * @since 3.6
+ */
+function epl_listing_query_cache_expiration() {
+	/**
+	 * Filters how long listing query results are cached, in seconds.
+	 *
+	 * @since 3.6
+	 *
+	 * @param int $expiration Default 12 hours.
+	 */
+	return (int) apply_filters( 'epl_listing_query_cache_expiration', 12 * HOUR_IN_SECONDS );
+}
+
+/**
+ * Remember a query visitors use, so the background rebuild can refresh it
+ *
+ * Keeps up to 300 queries; ones unused for 14 days are dropped by the rebuild.
+ *
+ * @param string $key         Query key.
+ * @param string $sql         A prepared SQL query.
+ * @param string $return_type col or results.
+ *
+ * @return void
+ *
+ * @since 3.6
+ */
+function epl_listing_query_cache_remember( $key, $sql, $return_type ) {
+	$queries = get_option( 'epl_listing_query_cache_queries', array() );
+	$queries = is_array( $queries ) ? $queries : array();
+
+	// Write at most once a day per query.
+	if ( isset( $queries[ $key ] ) && $queries[ $key ]['used'] > time() - DAY_IN_SECONDS ) {
+		return;
+	}
+
+	$queries[ $key ] = array(
+		'sql'    => $sql,
+		'return' => $return_type,
+		'used'   => time(),
+	);
+
+	if ( count( $queries ) > 300 ) {
+		uasort(
+			$queries,
+			function ( $a, $b ) {
+				return $b['used'] - $a['used'];
+			}
+		);
+		$queries = array_slice( $queries, 0, 300, true );
+	}
+
+	update_option( 'epl_listing_query_cache_queries', $queries, false );
+}
+
+/**
+ * Refresh the cached listing query results
+ *
+ * By default this marks the cache as out of date and starts the background rebuild:
+ * visitors keep getting the current results until it finishes. With $now true, the
+ * cache is cleared straight away and the next page load rebuilds as it goes. Call it
+ * after changing listings directly in the database.
+ *
+ * @param bool $now Clear now instead of rebuilding in the background.
+ *
+ * @return void
+ *
+ * @since 3.6
+ */
+function epl_flush_listing_query_cache( $now = false ) {
+	if ( $now ) {
+		$old_version = (int) get_option( 'epl_listing_query_cache_version', 1 );
+		update_option( 'epl_listing_query_cache_version', $old_version + 1, true );
+		delete_option( 'epl_listing_query_cache_stale' );
+		epl_delete_listing_query_cache_version( $old_version );
+		return;
+	}
+
+	if ( ! get_option( 'epl_listing_query_cache_stale' ) ) {
+		update_option( 'epl_listing_query_cache_stale', time(), true );
+	}
+
+	if ( ! wp_next_scheduled( 'epl_listing_query_cache_rebuild' ) ) {
+		wp_schedule_single_event( time(), 'epl_listing_query_cache_rebuild' );
+	}
+
+	// Start the rebuild now, without waiting for the next visitor (a background request).
+	if ( ! wp_doing_cron() && function_exists( 'spawn_cron' ) ) {
+		spawn_cron();
+	}
+}
+
+/**
+ * Background rebuild of the listing query cache (WP-Cron)
+ *
+ * Runs every query visitors have used into a new cache version, then switches the site
+ * to it. If listings changed again while it ran, it schedules another rebuild.
+ *
+ * @return void
+ *
+ * @since 3.6
+ */
+function epl_rebuild_listing_query_cache() {
+	$started = time();
+	$version = (int) get_option( 'epl_listing_query_cache_version', 1 ) + 1;
+	$queries = get_option( 'epl_listing_query_cache_queries', array() );
+	$queries = is_array( $queries ) ? $queries : array();
+
+	if ( function_exists( 'set_time_limit' ) ) {
+		set_time_limit( 600 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged
+	}
+
+	foreach ( $queries as $key => $query ) {
+		if ( $query['used'] < $started - 14 * DAY_IN_SECONDS ) {
+			unset( $queries[ $key ] );
+			continue;
+		}
+		set_transient( epl_listing_query_cache_transient( $key, $version ), epl_listing_query_run( $query['sql'], $query['return'] ), epl_listing_query_cache_expiration() );
+	}
+
+	update_option( 'epl_listing_query_cache_queries', $queries, false );
+	update_option( 'epl_listing_query_cache_version', $version, true );
+	epl_delete_listing_query_cache_version( $version - 1, $queries );
+
+	// Listings changed again while rebuilding: go again.
+	if ( (int) get_option( 'epl_listing_query_cache_stale', 0 ) >= $started ) {
+		wp_schedule_single_event( time(), 'epl_listing_query_cache_rebuild' );
+	} else {
+		delete_option( 'epl_listing_query_cache_stale' );
+	}
+}
+add_action( 'epl_listing_query_cache_rebuild', 'epl_rebuild_listing_query_cache' );
+
+/**
+ * Delete the cached results of an old cache version
+ *
+ * Without this, every refresh left a full copy of the old results in the database until
+ * they expired (12 hours), which adds up on sites without an object cache.
+ *
+ * @param int        $version Cache version to delete.
+ * @param array|null $queries Remembered queries, read from the option when null.
+ *
+ * @return void
+ *
+ * @since 3.6 Added: old copies are deleted as soon as a refresh finishes.
+ */
+function epl_delete_listing_query_cache_version( $version, $queries = null ) {
+	if ( null === $queries ) {
+		$queries = get_option( 'epl_listing_query_cache_queries', array() );
+	}
+
+	foreach ( array_keys( (array) $queries ) as $key ) {
+		delete_transient( epl_listing_query_cache_transient( $key, (int) $version ) );
+	}
+}
+
+/**
+ * Does a change to this meta key leave the listing query cache as it is?
+ *
+ * Hidden meta keys (starting with an underscore, like the _edit_lock WordPress saves
+ * every minute while a listing is open in the editor) are never used by the cached
+ * search queries, so changing them doesn't refresh the cache.
+ *
+ * @param string $meta_key Meta key.
+ *
+ * @return bool
+ *
+ * @since 3.6 Added: editing a listing refreshed the cache every minute.
+ */
+function epl_listing_query_cache_ignores_meta_key( $meta_key ) {
+	$ignore = is_string( $meta_key ) && 0 === strpos( $meta_key, '_' );
+
+	/**
+	 * Filters whether a meta key change leaves the listing query cache as it is.
+	 *
+	 * @since 3.6
+	 *
+	 * @param bool   $ignore   True for hidden keys (starting with an underscore).
+	 * @param string $meta_key Meta key.
+	 */
+	return (bool) apply_filters( 'epl_listing_query_cache_ignores_meta_key', $ignore, $meta_key );
+}
+
+/**
+ * Mark the listing query cache to be refreshed when this request ends
+ *
+ * Hooked to listing saves, deletes, status, meta and term changes. An import can change
+ * hundreds of meta values per listing, so the refresh starts once, at the end of the
+ * request.
+ *
+ * @param mixed $arg1 Hook argument: a post ID, post object, meta ID or new status, by hook.
+ * @param mixed $arg2 Hook argument: the object ID or old status, by hook.
+ * @param mixed $arg3 Hook argument: the post, by hook.
+ *
+ * @return void
+ *
+ * @since 3.6
+ */
+function epl_listing_query_cache_changed( $arg1 = null, $arg2 = null, $arg3 = null ) {
+	static $scheduled = false;
+
+	if ( $scheduled ) {
+		return;
+	}
+
+	$post_id = 0;
+	switch ( current_filter() ) {
+		case 'transition_post_status':
+			$post_id = $arg3 instanceof WP_Post ? $arg3->ID : 0;
+			break;
+		case 'added_post_meta':
+		case 'updated_post_meta':
+		case 'deleted_post_meta':
+			if ( epl_listing_query_cache_ignores_meta_key( $arg3 ) ) {
+				return;
+			}
+			$post_id = (int) $arg2;
+			break;
+		default:
+			$post_id = (int) $arg1;
+	}
+
+	$types = array_unique( array_merge( epl_get_core_post_types(), (array) epl_all_post_types() ) );
+
+	if ( ! $post_id || ! in_array( get_post_type( $post_id ), $types, true ) ) {
+		return;
+	}
+
+	$scheduled = true;
+	add_action( 'shutdown', 'epl_flush_listing_query_cache' );
+}
+add_action( 'save_post', 'epl_listing_query_cache_changed', 10, 1 );
+add_action( 'before_delete_post', 'epl_listing_query_cache_changed', 10, 1 );
+add_action( 'transition_post_status', 'epl_listing_query_cache_changed', 10, 3 );
+add_action( 'added_post_meta', 'epl_listing_query_cache_changed', 10, 3 );
+add_action( 'updated_post_meta', 'epl_listing_query_cache_changed', 10, 3 );
+add_action( 'deleted_post_meta', 'epl_listing_query_cache_changed', 10, 3 );
+add_action( 'set_object_terms', 'epl_listing_query_cache_changed', 10, 1 );
+
+/**
+ * Variable names the listing search templates keep for themselves
+ *
+ * The search templates copy URL values into variables so the form shows the current search.
+ * These names are never taken from the URL, or ?atts=x would break the page.
+ *
+ * @return string[]
+ *
+ * @since 3.6 Added.
+ */
+function epl_search_template_reserved_vars() {
+	return array( 'atts', 'user_atts', 'atts_key', 'atts_val', 'config', 'epl_frontend_field', 'epl_frontend_fields', 'epl_settings', 'get_data', 'get_key', 'get_val', 'global_counters', 'global_tab_counter', 'is_sb_current', 'post_type_label', 'queried_post_type', 'selected_post_types', 'show_title', 'tabcounter', 'value', 'GLOBALS', 'this', '_GET', '_POST', '_REQUEST', '_SERVER', '_COOKIE', '_FILES', '_ENV', '_SESSION' );
+}
+
+/**
+ * Keep only real listing statuses from a requested status list
+ *
+ * The search form's dropdowns are cached per status, so a made-up status in the URL
+ * (?property_status=<anything>) must not reach them, or every request adds cache entries.
+ *
+ * @param string|array $requested Comma separated statuses, or an array.
+ *
+ * @return string Comma separated known statuses, or '' when none are known.
+ *
+ * @since 3.6 Added: the search form templates passed the URL status to the dropdown queries unchecked.
+ */
+function epl_search_known_statuses( $requested ) {
+	$requested = is_array( $requested ) ? $requested : explode( ',', (string) $requested );
+	$known     = array_keys( epl_get_property_status_opts() );
+	$statuses  = array();
+
+	foreach ( $requested as $status ) {
+		$status = trim( (string) $status );
+		if ( in_array( $status, $known, true ) ) {
+			$statuses[] = $status;
+		}
+	}
+
+	return implode( ',', $statuses );
+}
+
+/**
  * Description: Getting all the values associated with a specific custom post meta key, across all posts
  * Author: Chinmoy Paul
  * Author URL: http://pwdtechnology.com
@@ -1833,8 +2399,14 @@ add_filter( 'epl_leased_label_status_filter', 'epl_leased_label_status_filter_ca
  * @since 3.5.3  Fix: Prepared statement for SQL.
  * @since 3.5.5  Fix: DB error due to double escaping.
  * @since 3.5.6  Fix: Status variable overwritten when status option was passed to the shortcode.
+ * @since 3.5.29 Fix: SQL injection. Post types are limited to registered ones and passed as prepared placeholders.
+ * @since 3.6    Fix: Slow query. The listing status table is only joined when filtering by status, on its own meta key, instead of every meta row of every listing (33x faster on 735 rentals). Results are cached until a listing changes (epl_listing_query_cache()).
+ * @since 3.6 Security: only real listing statuses are used (epl_search_known_statuses()), so a made-up status can't add cache entries.
  */
 function epl_get_unique_post_meta_values( $key = '', $type = '', $status = 'publish', $property_status = '' ) {
+
+	// Only real listing statuses: results are cached per status (epl_search_known_statuses()).
+	$property_status = epl_search_known_statuses( $property_status );
 
 	global $wpdb;
 
@@ -1859,14 +2431,11 @@ function epl_get_unique_post_meta_values( $key = '', $type = '', $status = 'publ
 
 	$type_placeholders = implode( ', ', array_fill( 0, count( $type ), '%s' ) );
 
-	$query = "
-	SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm
-	LEFT JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-	LEFT JOIN {$wpdb->postmeta} pm2 ON pm.post_id = pm2.post_id
-	WHERE pm.meta_key = '%s'
-	AND p.post_status = '%s'
-	AND p.post_type IN ( {$type_placeholders} )
-	";
+	// The listing status is only joined when filtering by it. Joining the whole postmeta
+	// table without a key matched every meta row of every listing (100+ each) and made
+	// this query slow on bigger sites.
+	$status_join  = '';
+	$status_where = '';
 
 	if ( ! empty( $property_status ) ) {
 
@@ -1878,15 +2447,25 @@ function epl_get_unique_post_meta_values( $key = '', $type = '', $status = 'publ
 				$prepared_status_values[] = $wpdb->prepare( '%s', $status_value );
 			}
 
-			$in_clause = implode( ',', $prepared_status_values );
-
-			$query .= " AND pm2.meta_key = 'property_status' AND pm2.meta_value IN ($in_clause) ";
+			$status_join  = "INNER JOIN {$wpdb->postmeta} pm2 ON ( pm2.post_id = pm.post_id AND pm2.meta_key = 'property_status' )";
+			$status_where = ' AND pm2.meta_value IN (' . implode( ',', $prepared_status_values ) . ') ';
 		}
 	}
 
+	$query = "
+	SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm
+	INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+	{$status_join}
+	WHERE pm.meta_key = '%s'
+	AND p.post_status = '%s'
+	AND p.post_type IN ( {$type_placeholders} )
+	{$status_where}
+	";
+
 	$prepare_args = array_merge( array( $key, $status ), $type );
-	$res          = $wpdb->get_col( $wpdb->prepare( $query, $prepare_args ) ); // phpcs:ignore
-	$res          = array_filter( $res );
+	$sql          = $wpdb->prepare( $query, $prepare_args ); // phpcs:ignore
+
+	$res = array_filter( epl_listing_query_cache( $sql ) );
 
 	foreach ( $res as $key => &$elem ) {
 		$elem = maybe_unserialize( $elem );
@@ -2426,6 +3005,111 @@ function epl_get_property_com_authority_opts() {
 			'tender'  => __( 'Tender', 'easy-property-listings' ),
 		)
 	);
+}
+
+/**
+ * Commercial Authority label for a saved value
+ *
+ * @param string $key Saved property_com_authority value, for example eoi.
+ *
+ * @return string Label, for example EOI, or '' when the value isn't an option.
+ *
+ * @since 3.6
+ */
+function epl_get_property_com_authority_label( $key ) {
+	$opts = epl_get_property_com_authority_opts();
+
+	return ( is_scalar( $key ) && isset( $opts[ $key ] ) ) ? (string) $opts[ $key ] : '';
+}
+
+/**
+ * Status of the current listing
+ *
+ * @return string Saved property_status value (current, sold, leased, withdrawn, offmarket), or '' outside a listing.
+ *
+ * @since 3.6
+ */
+function epl_get_listing_status() {
+	global $property;
+
+	$status = $property instanceof EPL_Property_Meta ? (string) $property->get_property_meta( 'property_status' ) : '';
+
+	return apply_filters( 'epl_get_listing_status', $status );
+}
+
+/**
+ * Status label of the current listing, for cards and headings
+ *
+ * Sales listings: For Sale, Auction (current with auction authority) or Sold. Rentals: For Rent
+ * or Leased. Commercial: Buy, Lease or Buy or Lease from the listing type, then Sold or Leased.
+ * Sold and Leased use the Sold and Leased label settings. Other statuses return ''.
+ *
+ * @param array $labels Labels to override, keyed label_for_sale, label_auction, label_sold,
+ *                      label_for_lease, label_leased, label_commercial_sale, label_commercial_lease,
+ *                      label_commercial_both, label_commercial_sold, label_commercial_leased.
+ *
+ * @return string
+ *
+ * @since 3.6
+ */
+function epl_get_listing_status_label( $labels = array() ) {
+	global $property;
+
+	if ( ! $property instanceof EPL_Property_Meta ) {
+		return '';
+	}
+
+	$label_sold   = epl_get_option( 'label_sold', __( 'Sold', 'easy-property-listings' ) );
+	$label_leased = epl_get_option( 'label_leased', __( 'Leased', 'easy-property-listings' ) );
+
+	$labels = array_merge(
+		array(
+			'label_for_sale'          => __( 'For Sale', 'easy-property-listings' ),
+			'label_auction'           => __( 'Auction', 'easy-property-listings' ),
+			'label_sold'              => $label_sold,
+			'label_for_lease'         => __( 'For Rent', 'easy-property-listings' ),
+			'label_leased'            => $label_leased,
+			'label_commercial_sale'   => __( 'Buy', 'easy-property-listings' ),
+			'label_commercial_lease'  => __( 'Lease', 'easy-property-listings' ),
+			'label_commercial_both'   => __( 'Buy or Lease', 'easy-property-listings' ),
+			'label_commercial_sold'   => $label_sold,
+			'label_commercial_leased' => $label_leased,
+		),
+		(array) $labels
+	);
+
+	$post_type = $property->post_type;
+	$status    = epl_get_listing_status();
+	$label     = '';
+
+	if ( 'rental' === $post_type ) {
+		if ( 'current' === $status ) {
+			$label = $labels['label_for_lease'];
+		} elseif ( 'leased' === $status ) {
+			$label = $labels['label_leased'];
+		}
+	} elseif ( 'commercial' === $post_type ) {
+		if ( 'sold' === $status ) {
+			$label = $labels['label_commercial_sold'];
+		} elseif ( 'leased' === $status ) {
+			$label = $labels['label_commercial_leased'];
+		} elseif ( 'current' === $status ) {
+			$type = $property->get_property_meta( 'property_com_listing_type' );
+			if ( 'sale' === $type ) {
+				$label = $labels['label_commercial_sale'];
+			} elseif ( 'lease' === $type ) {
+				$label = $labels['label_commercial_lease'];
+			} else {
+				$label = $labels['label_commercial_both'];
+			}
+		}
+	} elseif ( 'current' === $status ) {
+		$label = 'auction' === $property->get_property_meta( 'property_authority' ) ? $labels['label_auction'] : $labels['label_for_sale'];
+	} elseif ( 'sold' === $status ) {
+		$label = $labels['label_sold'];
+	}
+
+	return apply_filters( 'epl_get_listing_status_label', $label, $status, $post_type, $labels );
 }
 
 /**

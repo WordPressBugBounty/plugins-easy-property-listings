@@ -18,6 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Get list of all EPL image sizes
  *
  * @since 3.2.3
+ * @since 3.6 The medium crop (epl-image-medium-crop) doubled from 300x200 to 600x400, for sharp images on high resolution screens and wider cards. Images uploaded before need their thumbnails regenerated to get the new size; until then the existing 300x200 files are used.
  */
 function get_epl_image_sizes() {
 	return apply_filters(
@@ -31,8 +32,8 @@ function get_epl_image_sizes() {
 			),
 			array(
 				'id'     => 'epl-image-medium-crop',
-				'height' => 200,
-				'width'  => 300,
+				'height' => 400,
+				'width'  => 600,
 				'crop'   => true,
 			),
 		)
@@ -41,7 +42,7 @@ function get_epl_image_sizes() {
 
 /**
  * Register image sizes for the admin list of property
- * and a hard cropped 300x200 px image for use in widgets
+ * and a hard cropped 600x400 px image for use in archives and widgets
  *
  * @since 1.0
  */
@@ -62,12 +63,13 @@ add_action( 'after_setup_theme', 'epl_image_sizes' );
  *
  * @return array
  * @since 1.0
+ * @since 3.6 Label says 600x400, the new medium crop size.
  */
 function epl_image_size_names_choose( $epl_sizes ) {
 	return array_merge(
 		$epl_sizes,
 		array(
-			'epl-image-medium-crop' => __( 'Medium 300x200 hard Crop', 'easy-property-listings' ),
+			'epl-image-medium-crop' => __( 'Medium 600x400 hard Crop', 'easy-property-listings' ),
 		)
 	);
 }
@@ -140,3 +142,96 @@ function epl_populate_post_author_email( $value ) {
 	return '';
 }
 add_filter( 'gform_field_value_author_email', 'epl_populate_post_author_email' );
+
+/**
+ * Gravity Forms: populate a field with the listing's second agent email
+ *
+ * Add a hidden field, tick "Allow field to be populated dynamically" on its Advanced tab and
+ * use the Parameter Name author_email_secondary. Empty when the listing has no second agent.
+ *
+ * @param string $value Field value.
+ *
+ * @return string
+ * @since 3.6
+ */
+function epl_populate_secondary_author_email( $value ) {
+	global $property;
+
+	if ( ! $property instanceof EPL_Property_Meta ) {
+		return '';
+	}
+
+	$agent_id = epl_listing_has_secondary_agent();
+
+	return $agent_id ? (string) get_the_author_meta( 'user_email', $agent_id ) : '';
+}
+add_filter( 'gform_field_value_author_email_secondary', 'epl_populate_secondary_author_email' );
+
+/**
+ * Gravity Forms: populate a field with the primary agent email
+ *
+ * Parameter Name primary_agent_email. Uses the current EPL author, so it follows the Staff
+ * Directory agent on staff pages.
+ *
+ * @param string $value Field value.
+ *
+ * @return string
+ * @since 3.6
+ */
+function epl_populate_primary_agent_email( $value ) {
+	global $epl_author;
+
+	return ( is_object( $epl_author ) && ! empty( $epl_author->email ) ) ? (string) $epl_author->email : '';
+}
+add_filter( 'gform_field_value_primary_agent_email', 'epl_populate_primary_agent_email' );
+
+/**
+ * Gravity Forms: populate a field with the primary agent name
+ *
+ * Parameter Name primary_agent_name.
+ *
+ * @param string $value Field value.
+ *
+ * @return string
+ * @since 3.6
+ */
+function epl_populate_primary_agent_name( $value ) {
+	global $epl_author;
+
+	return ( is_object( $epl_author ) && ! empty( $epl_author->name ) ) ? (string) $epl_author->name : '';
+}
+add_filter( 'gform_field_value_primary_agent_name', 'epl_populate_primary_agent_name' );
+
+/**
+ * Gravity Forms: populate a field with the listing unique ID
+ *
+ * Parameter Name property_unique_id.
+ *
+ * @param string $value Field value.
+ *
+ * @return string
+ * @since 3.6
+ */
+function epl_populate_property_unique_id( $value ) {
+	global $property;
+
+	return $property instanceof EPL_Property_Meta ? (string) $property->get_property_meta( 'property_unique_id' ) : '';
+}
+add_filter( 'gform_field_value_property_unique_id', 'epl_populate_property_unique_id' );
+
+/**
+ * Gravity Forms: populate a field with the listing office ID
+ *
+ * Parameter Name property_office_id.
+ *
+ * @param string $value Field value.
+ *
+ * @return string
+ * @since 3.6
+ */
+function epl_populate_property_office_id( $value ) {
+	global $property;
+
+	return $property instanceof EPL_Property_Meta ? (string) $property->get_property_meta( 'property_office_id' ) : '';
+}
+add_filter( 'gform_field_value_property_office_id', 'epl_populate_property_office_id' );

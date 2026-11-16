@@ -162,6 +162,15 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		public $display_bond;
 
 		/**
+		 * Under Offer Price Display option
+		 *
+		 * @var $display_price_under_offer
+		 *
+		 * @since 3.6
+		 */
+		public $display_price_under_offer;
+
+		/**
 		 * Get things going
 		 *
 		 * @param object $post Post object.
@@ -708,6 +717,85 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		}
 
 		/**
+		 * Show the street address?
+		 *
+		 * True when the listing's Display Street Address box is ticked. The street address is
+		 * the lot, unit, street number and street name.
+		 *
+		 * @since 3.6 New: one rule for every address function.
+		 *
+		 * @return bool
+		 */
+		public function show_street_address() {
+			$show = 'yes' === $this->get_property_meta( 'property_address_display' );
+
+			/**
+			 * Filters whether the listing shows its street address.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool              $show     True to show the street address.
+			 * @param EPL_Property_Meta $property The listing.
+			 */
+			return (bool) apply_filters( 'epl_listing_show_street_address', $show, $this );
+		}
+
+		/**
+		 * Show the suburb?
+		 *
+		 * Always for residential listings. Commercial, commercial land and business listings
+		 * have a Display Suburb box: their suburb shows when it's ticked or when the street
+		 * address shows. The same rule as the REST API.
+		 *
+		 * @since 3.6 New: one rule for every address function.
+		 *
+		 * @return bool
+		 */
+		public function show_suburb() {
+			$show = true;
+
+			if ( in_array( $this->post_type, array( 'commercial', 'commercial_land', 'business' ), true ) ) {
+				$show = $this->show_street_address() || 'yes' === $this->get_property_meta( 'property_com_display_suburb' );
+			}
+
+			/**
+			 * Filters whether the listing shows its suburb.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool              $show     True to show the suburb.
+			 * @param EPL_Property_Meta $property The listing.
+			 */
+			return (bool) apply_filters( 'epl_listing_show_suburb', $show, $this );
+		}
+
+		/**
+		 * Show the city in the address?
+		 *
+		 * True when Settings > Address > Additional Address Field (the city) is enabled.
+		 *
+		 * @since 3.6 New: one rule for every address function.
+		 *
+		 * @return bool
+		 */
+		public function show_address_city() {
+			return (bool) apply_filters( 'epl_listing_show_address_city', 'yes' === $this->get_epl_settings( 'epl_enable_city_field' ), $this );
+		}
+
+		/**
+		 * Show the country in the address?
+		 *
+		 * True when Settings > Address > Display Country is enabled.
+		 *
+		 * @since 3.6 New: one rule for every address function.
+		 *
+		 * @return bool
+		 */
+		public function show_address_country() {
+			return (bool) apply_filters( 'epl_listing_show_address_country', 'yes' === $this->get_epl_settings( 'epl_enable_country_field' ), $this );
+		}
+
+		/**
 		 * Listing Category
 		 *
 		 * @since 2.0
@@ -806,11 +894,168 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		}
 
 		/**
+		 * Is the listing under offer?
+		 *
+		 * A listing is under offer when it is marked under offer and is not sold.
+		 *
+		 * @since 3.6
+		 *
+		 * @return bool
+		 */
+		public function is_under_offer() {
+			$under_offer = 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' );
+
+			/**
+			 * Filters whether the listing is under offer.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool              $under_offer True when the listing is under offer.
+			 * @param EPL_Property_Meta $property    The listing.
+			 */
+			return (bool) apply_filters( 'epl_is_under_offer', $under_offer, $this );
+		}
+
+		/**
+		 * Does the listing advertise a price?
+		 *
+		 * True when the listing is set to display its price, has a price to display and is
+		 * not an auction. Listings showing the No Price label (POA) or an auction date
+		 * advertise no price.
+		 *
+		 * @since 3.6
+		 *
+		 * @return bool
+		 */
+		public function has_advertised_price() {
+			$advertised = false;
+
+			if ( 'property' === $this->post_type || 'land' === $this->post_type || 'rural' === $this->post_type || 'business' === $this->post_type ) {
+				$advertised = 'auction' !== $this->get_property_meta( 'property_authority' )
+					&& 'yes' === $this->get_property_meta( 'property_price_display' )
+					&& '' !== (string) $this->get_property_price_display();
+			} elseif ( 'commercial' === $this->post_type || 'commercial_land' === $this->post_type ) {
+				$advertised = 'auction' !== $this->get_property_meta( 'property_com_authority' )
+					&& 'yes' === $this->get_property_meta( 'property_price_display' )
+					&& ( '' !== (string) $this->get_property_price_display() || '' !== (string) $this->get_property_com_rent() );
+			}
+
+			/**
+			 * Filters whether the listing advertises a price.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool              $advertised True when the listing advertises a price.
+			 * @param EPL_Property_Meta $property   The listing.
+			 */
+			return (bool) apply_filters( 'epl_listing_has_advertised_price', $advertised, $this );
+		}
+
+		/**
+		 * Show the price on listings that are under offer?
+		 *
+		 * On unless the Under Offer Price Display setting is set to hide the price, so the
+		 * advertised price stays visible until the listing sells. NSW underquoting rules
+		 * require this from 17 November 2026.
+		 *
+		 * @since 3.6
+		 *
+		 * @return bool
+		 */
+		public function show_price_under_offer() {
+			$show = 'no' !== $this->get_epl_settings( 'display_price_under_offer' );
+
+			/**
+			 * Filters whether under offer listings show their price.
+			 *
+			 * @since 3.6
+			 *
+			 * @param bool              $show     True to show the price with the Under Offer label.
+			 * @param EPL_Property_Meta $property The listing.
+			 */
+			return (bool) apply_filters( 'epl_show_price_under_offer', $show, $this );
+		}
+
+		/**
+		 * No Price (POA) label from the settings.
+		 *
+		 * @since 3.6
+		 *
+		 * Reads the setting with epl_get_saved_option(), so a label saved empty stays empty and
+		 * the epl_get_option_label_poa filter applies.
+		 *
+		 * @param string|null $fallback Returned when the label setting has never been saved.
+		 * @return string|null
+		 */
+		public function get_poa_label( $fallback = null ) {
+			return epl_get_saved_option( 'label_poa', $fallback );
+		}
+
+		/**
+		 * Under offer price.
+		 *
+		 * Keeps the advertised price visible next to the Under Offer label, for example
+		 * "Under Offer | $360,000 - $390,000". Returns the Under Offer label on its own when
+		 * the listing advertises no price or the site hides the price under offer.
+		 *
+		 * @since 3.6
+		 * @since 3.6 With the price shown, the wrapper has the class epl-under-offer-has-price so only the label is coloured.
+		 *
+		 * @param string $price  The price shown when the listing is not under offer.
+		 * @param string $format Output format: span, div, li or text.
+		 * @return string
+		 */
+		public function get_under_offer_price( $price, $format = 'span' ) {
+			$label = $this->label_under_offer;
+			$price = (string) $price;
+
+			if ( ! $this->show_price_under_offer() || ! $this->has_advertised_price() || '' === trim( wp_strip_all_tags( $price ) ) ) {
+				if ( 'text' === $format ) {
+					$output = $label;
+				} else {
+					$output = '<' . $format . ' class="page-price under-offer-status">' . $label . '</' . $format . '>';
+				}
+			} else {
+				/**
+				 * Filters the separator between the Under Offer label and the price.
+				 *
+				 * @since 3.6
+				 *
+				 * @param string $separator Default ' | '.
+				 */
+				$separator = apply_filters( 'epl_under_offer_price_separator', ' | ' );
+
+				if ( 'text' === $format ) {
+					$output = $label . $separator . $price;
+				} else {
+					$output = '<' . $format . ' class="page-price under-offer-status epl-under-offer-has-price">'
+						. '<span class="epl-under-offer-label">' . $label . '</span>'
+						. '<span class="epl-under-offer-separator">' . $separator . '</span>'
+						. '<span class="epl-under-offer-price">' . $price . '</span>'
+						. '</' . $format . '>';
+				}
+			}
+
+			/**
+			 * Filters the under offer price.
+			 *
+			 * @since 3.6
+			 *
+			 * @param string            $output   Under Offer label, with the price when shown.
+			 * @param string            $price    The price shown when the listing is not under offer.
+			 * @param string            $format   Output format: span, div, li or text.
+			 * @param EPL_Property_Meta $property The listing.
+			 */
+			return apply_filters( 'epl_get_under_offer_price', $output, $price, $format, $this );
+		}
+
+		/**
 		 * Plain price value
 		 *
 		 * @since 2.0.0
 		 * @since 3.4.38 Using label_poa for no rental price. Added epl_price_rent_period filter. Added filter epl_pa_price for P.A label.
 		 * @since 3.5.22 Applying string to lower case on the yes values.
+		 * @since 3.6 Under offer listings keep the advertised price next to the Under Offer label unless hidden in the settings. Uses is_under_offer(), get_poa_label() and get_under_offer_price().
 		 *
 		 * @return string
 		 */
@@ -825,15 +1070,10 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 				} elseif ( ! empty( $price_display ) && 'yes' === $this->get_property_meta( 'property_price_display' ) ) {   // Property.
 					$price_plain_value = $this->get_property_price_display();
 				} else {
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_plain_value = $this->epl_settings['label_poa'];
-					} else {
-						$price_plain_value = __( 'POA', 'easy-property-listings' );
-					}
+					$price_plain_value = $this->get_poa_label( __( 'POA', 'easy-property-listings' ) );
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
-
-					$price_plain_value = $this->label_under_offer;
+				if ( $this->is_under_offer() ) {
+					$price_plain_value = $this->get_under_offer_price( $this->get_property_price_display(), 'text' );
 				}
 			} elseif ( 'rental' === $this->post_type ) {
 				$prop_rent = $this->get_property_rent();
@@ -854,11 +1094,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					$price_plain_value = $this->label_leased . ' ' . $this->get_property_rent();
 
 				} else {
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_plain_value = $this->epl_settings['label_poa'];
-					} else {
-						$price_plain_value = __( 'TBA', 'easy-property-listings' );
-					}
+					$price_plain_value = $this->get_poa_label( __( 'TBA', 'easy-property-listings' ) );
 				}
 			} elseif ( 'commercial' === $this->post_type || 'commercial_land' === $this->post_type ) {
 				$price_display    = $this->get_property_price_display();
@@ -874,8 +1110,9 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					} elseif ( ! empty( $price_display ) && 'yes' === $this->get_property_meta( 'property_price_display' ) ) {   // Property.
 						$price_plain_value = apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . ': ' . $this->get_property_price_display() . $this->get_property_tax();
 					} else {
-						if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-							$price_plain_value = apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . ' ' . $this->epl_settings['label_poa'];
+						$poa_label = $this->get_poa_label();
+						if ( null !== $poa_label ) {
+							$price_plain_value = apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . ' ' . $poa_label;
 						}
 					}
 				}
@@ -890,8 +1127,9 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					} elseif ( $this->get_property_meta( 'property_com_listing_type' ) === 'both' ) {
 						$price_plain_value .= $both . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . ' ' . $this->get_property_com_rent() . ' ' . $rent_lease_type;
 					} else {
-						if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-							$price_plain_value .= $both . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . ' ' . $this->epl_settings['label_poa'];
+						$poa_label = $this->get_poa_label();
+						if ( null !== $poa_label ) {
+							$price_plain_value .= $both . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . ' ' . $poa_label;
 						}
 					}
 				}
@@ -900,8 +1138,8 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					$price_plain_value = $this->label_sold;
 				}
 				// Under Offer.
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
-					$price_plain_value = $this->label_under_offer;
+				if ( $this->is_under_offer() ) {
+					$price_plain_value = $this->get_under_offer_price( $price_plain_value, 'text' );
 				}
 				// Leased.
 				if ( 'leased' === $this->get_property_meta( 'property_status' ) ) {
@@ -918,6 +1156,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		 * @since 3.4.27 Fixed rent period translation.
 		 * @since 3.4.28 Using label_poa for no rental price. Added epl_price_rent_period filter. Added filter epl_pa_price for P.A label.
 		 * @since 3.4.38 Commercial listing type "both" now shows sale & lease prices.
+		 * @since 3.6 Under offer listings keep the advertised price next to the Under Offer label unless hidden in the settings. Uses is_under_offer(), get_poa_label() and get_under_offer_price().
 		 * @return string
 		 */
 		public function get_price() {
@@ -937,14 +1176,10 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 				} elseif ( 'auction' === $this->get_property_meta( 'property_authority' ) && 'no' === $this->get_property_meta( 'property_price_display' ) ) {  // Auction.
 					$price = '<span class="page-price auction">' . apply_filters( 'epl_get_property_auction_label', __( 'Auction', 'easy-property-listings' ) ) . ' ' . $this->get_property_auction() . '</span>';
 				} else {
-					$price_poa = __( 'POA', 'easy-property-listings' );
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_poa = $this->epl_settings['label_poa'];
-					}
-					$price = '<span class="page-price">' . $price_poa . '</span>';
+					$price = '<span class="page-price">' . $this->get_poa_label( __( 'POA', 'easy-property-listings' ) ) . '</span>';
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
-					$price = '<span class="page-price under-offer-status">' . $this->label_under_offer . '</span>';
+				if ( $this->is_under_offer() ) {
+					$price = $this->get_under_offer_price( $this->get_property_price_display(), 'span' );
 				}
 			} elseif ( 'rental' === $this->post_type ) {
 				if ( ! empty( $prop_rent ) && 'yes' === $this->get_property_meta( 'property_rent_display' ) && 'leased' !== $this->get_property_meta( 'property_status' ) ) {
@@ -969,11 +1204,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					$price = '<span class="page-price sold-status">' . $this->label_leased . '</span>';
 
 				} else {
-					$price_poa = __( 'TBA', 'easy-property-listings' );
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_poa = $this->epl_settings['label_poa'];
-					}
-					$price = '<span class="page-price">' . $price_poa . '</span>';
+					$price = '<span class="page-price">' . $this->get_poa_label( __( 'TBA', 'easy-property-listings' ) ) . '</span>';
 				}
 			} elseif ( 'commercial' === $this->post_type || 'commercial_land' === $this->post_type ) {
 				$prop_com_rent_period = $this->get_property_meta( 'property_com_rent_period' );
@@ -1004,11 +1235,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					} elseif ( ! empty( $price_display ) && 'yes' === $this->get_property_meta( 'property_price_display' ) ) {   // Property.
 						$price = '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . '</span> ' . $this->get_property_price_display() . $this->get_property_tax() . '</span>';
 					} else {
-						$price_plain_value = '';
-						if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-							$price_plain_value = $this->epl_settings['label_poa'];
-						}
-						$price = '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . '</span> ' . $price_plain_value . '</span>';
+						$price = '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . '</span> ' . $this->get_poa_label( '' ) . '</span>';
 					}
 				}
 
@@ -1026,8 +1253,9 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 						}
 					} else {
 						// Hide Price.
-						if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-							$price .= $both . '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . '</span> ' . $this->epl_settings['label_poa'] . '</span>';
+						$poa_label = $this->get_poa_label();
+						if ( null !== $poa_label ) {
+							$price .= $both . '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . '</span> ' . $poa_label . '</span>';
 						}
 					}
 
@@ -1049,8 +1277,9 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 						}
 					} else {
 						// Hide Price.
-						if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) && empty( $prop_price_view ) ) {
-							$price .= $both . '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . '</span> ' . $this->epl_settings['label_poa'] . '</span>';
+						$poa_label = $this->get_poa_label();
+						if ( null !== $poa_label && empty( $prop_price_view ) ) {
+							$price .= $both . '<span class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_lease_label', __( 'For Lease', 'easy-property-listings' ) ) . '</span> ' . $poa_label . '</span>';
 						}
 					}
 				}
@@ -1059,8 +1288,8 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 				if ( 'sold' === $this->get_property_meta( 'property_status' ) ) {
 					$price = '<span class="page-price sold-status">' . $this->label_sold . '</span>' . $this->get_property_price_sold_display();
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) { // Under Offer.
-					$price = '<div class="page-price under-offer-status">' . $this->label_under_offer . '</div>';
+				if ( $this->is_under_offer() ) { // Under Offer.
+					$price = $this->get_under_offer_price( $price, 'div' );
 				}
 				if ( 'leased' === $this->get_property_meta( 'property_status' ) ) {
 					$price = '<span class="page-price leased-status sold-status">' . $this->label_leased . '</span>' . $this->get_property_price_lease_display();
@@ -1077,6 +1306,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		 * @since 2.0
 		 * @since 3.5 Added fix for trim when string string is null.
 		 * @since 3.5.14 Added missing new status sticker for commercial listings.
+		 * @since 3.6 Uses is_under_offer(). Sticker output unchanged.
 		 */
 		public function get_price_sticker() {
 			$price_sticker = '';
@@ -1112,7 +1342,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 						$price_sticker .= '<span class="status-sticker open">' . $this->get_epl_settings( 'label_home_open' ) . '</span>';
 					}
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
+				if ( $this->is_under_offer() ) {
 					$price_sticker  = '';
 					$price_sticker .= '<span class="status-sticker under-offer">' . $this->label_under_offer . '</span>';
 				}
@@ -1149,7 +1379,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 					$price_sticker .= '<span class="status-sticker leased">' . $this->label_leased . '</span>';
 				}
 
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
+				if ( $this->is_under_offer() ) {
 					$price_sticker  = '';
 					$price_sticker .= '<span class="status-sticker under-offer">' . $this->label_under_offer . '</span>';
 				}
@@ -1166,6 +1396,7 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 		 *
 		 * @since 2.0.0
 		 * @since 3.4.38 Added epl_price_rent_period filter.  Added filter epl_pa_price for P.A label.
+		 * @since 3.6 Under offer listings keep the advertised price next to the Under Offer label unless hidden in the settings. Uses is_under_offer(), get_poa_label() and get_under_offer_price(). Fixed the undefined $price_plain_value warning when the No Price label setting is missing.
 		 */
 		public function get_l_price() {
 			$price_display = $this->get_property_price_display();
@@ -1177,13 +1408,10 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 				} elseif ( ! empty( $price_display ) && 'yes' === $this->get_property_meta( 'property_price_display' ) ) {   // Property.
 					$l_price = '<li class="page-price">' . $this->get_property_price_display() . '</li>';
 				} else {
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_plain_value = $this->epl_settings['label_poa'];
-					}
-					$l_price = '<li class="page-price">' . $price_plain_value . '</li>';
+					$l_price = '<li class="page-price">' . $this->get_poa_label( __( 'POA', 'easy-property-listings' ) ) . '</li>';
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
-					$l_price = '<li class="page-price under-offer-status">' . $this->label_under_offer . '</li>';
+				if ( $this->is_under_offer() ) {
+					$l_price = $this->get_under_offer_price( $this->get_property_price_display(), 'li' );
 				}
 			} elseif ( 'rental' === $this->post_type ) {
 				$prop_rent = $this->get_property_rent();
@@ -1208,14 +1436,10 @@ if ( ! class_exists( 'EPL_Property_Meta' ) ) :
 				} elseif ( ! empty( $price_display ) && 'yes' === $this->get_property_meta( 'property_price_display' ) ) { // Property.
 					$l_price = '<li class="page-price"><span class="page-price-prefix">' . apply_filters( 'epl_commercial_for_sale_label', __( 'For Sale', 'easy-property-listings' ) ) . '</span> ' . $this->get_property_price_display() . $this->get_property_tax() . '</li>';
 				} else {
-					$price_plain_value = '';
-					if ( ! empty( $this->epl_settings ) && isset( $this->epl_settings['label_poa'] ) ) {
-						$price_plain_value = $this->epl_settings['label_poa'];
-					}
-					$l_price = '<li class="page-price">' . $price_plain_value . '</li>';
+					$l_price = '<li class="page-price">' . $this->get_poa_label( '' ) . '</li>';
 				}
-				if ( 'yes' === $this->get_property_meta( 'property_under_offer' ) && 'sold' !== $this->get_property_meta( 'property_status' ) ) {
-					$l_price = '<li class="page-price under-offer-status">' . $this->label_under_offer . '</li>';
+				if ( $this->is_under_offer() ) {
+					$l_price = $this->get_under_offer_price( trim( wp_strip_all_tags( $l_price ) ), 'li' );
 				}
 				if ( ! empty( $prop_com_rent ) && $this->get_property_meta( 'property_com_listing_type' ) === 'both' ) {
 

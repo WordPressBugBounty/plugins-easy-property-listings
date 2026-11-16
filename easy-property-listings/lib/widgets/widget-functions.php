@@ -1101,6 +1101,25 @@ function epl_search_pre_get_posts( $query ) {
 add_action( 'pre_get_posts', 'epl_search_pre_get_posts' );
 
 /**
+ * Can the listing search show this post type?
+ *
+ * True when the post type is registered and visitors can view it, so a
+ * switched off listing type (rentals turned off) or a private one (contacts)
+ * is left out of the search.
+ *
+ * @since 3.6 New: so the search skips switched off and private post types.
+ *
+ * @param string $post_type Post type name from the search request.
+ *
+ * @return bool
+ */
+function epl_search_can_show_post_type( $post_type ) {
+	$can_show = is_string( $post_type ) && post_type_exists( $post_type ) && is_post_type_viewable( $post_type );
+
+	return (bool) apply_filters( 'epl_search_can_show_post_type', $can_show, $post_type );
+}
+
+/**
  * Is Property Search
  *
  * @since  2.3.1
@@ -1122,6 +1141,8 @@ function epl_is_search() {
  * @return mixed|void
  * @since  2.3.1
  * @since  3.4.40 Fix: Search category options fixed for the all search tab.
+ * @since  3.5.29 Fix: SQL injection. Post types are limited to registered ones and passed as prepared placeholders.
+ * @since  3.6 Results are cached until a listing changes (epl_listing_query_cache()).
  */
 function epl_get_meta_values( $key = '', $type = 'post', $status = 'publish' ) {
 
@@ -1161,7 +1182,7 @@ function epl_get_meta_values( $key = '', $type = 'post', $status = 'publish' ) {
 		AND pm.`meta_value` != ''";
 
 	$prepare_args = array_merge( array( $key, $status ), $type );
-	$results      = $wpdb->get_results( $wpdb->prepare( $query, $prepare_args ) );
+	$results      = epl_listing_query_cache( $wpdb->prepare( $query, $prepare_args ), 'results' );
 
 	if ( ! empty( $results ) ) {
 
@@ -1251,19 +1272,34 @@ add_filter( 'posts_where', 'epl_listings_where', 10, 2 );
  * @return mixed terms which is filterable with epl_get_available_terms.
  *
  * @since 3.5.26 Query values are now escaped with a prepared statement.
+ * @since 3.6 Fix: Slow query. The listing meta table is only joined when filtering by listing status, on the property_status key, instead of every meta row of every listing (23x faster on 735 rentals). Results are cached until a listing changes (epl_listing_query_cache()).
+ * @since 3.6 Security: only real listing statuses are used (epl_search_known_statuses()), so a made-up status can't add cache entries.
  */
 function epl_get_available_terms( $tax = 'location', $post_type = '', $property_status = '' ) {
+
+	// Only real listing statuses: results are cached per status (epl_search_known_statuses()).
+	$property_status = epl_search_known_statuses( $property_status );
 	global $wpdb;
 
-	$query_args          = array( $tax );
+	$query_args = array( $tax );
+
+	// The listing meta is only joined when filtering by listing status, on that one key.
+	// Joining every meta row of every listing (100+ each) made this query slow.
+	$status_values = array();
+	if ( ! empty( $property_status ) ) {
+		$property_status = array_map( 'trim', explode( ',', $property_status ) ); // Passed to the filter as an array, as before.
+		$status_values   = $property_status;
+	}
+	$status_join = $status_values ? "INNER JOIN {$wpdb->prefix}postmeta pm ON ( p.ID = pm.post_id AND pm.meta_key = 'property_status' )" : '';
+
 	$available_loc_query = "
 	SELECT DISTINCT (
 		tt.term_id
 	)
 	FROM {$wpdb->prefix}posts p
-	LEFT JOIN {$wpdb->prefix}postmeta pm ON ( p.ID = pm.post_id )
-	LEFT JOIN {$wpdb->prefix}term_relationships tr ON ( p.ID = tr.object_id )
-	LEFT JOIN {$wpdb->prefix}term_taxonomy tt ON ( tr.term_taxonomy_id = tt.term_taxonomy_id ) WHERE
+	{$status_join}
+	INNER JOIN {$wpdb->prefix}term_relationships tr ON ( p.ID = tr.object_id )
+	INNER JOIN {$wpdb->prefix}term_taxonomy tt ON ( tr.term_taxonomy_id = tt.term_taxonomy_id ) WHERE
 	tt.taxonomy 			= %s
 	AND p.post_status 		= 'publish'";
 
@@ -1275,16 +1311,15 @@ function epl_get_available_terms( $tax = 'location', $post_type = '', $property_
 		$query_args[]         = is_array( $post_type ) ? '' : (string) $post_type;
 	}
 
-	if ( ! empty( $property_status ) ) {
-		$property_status = array_map( 'trim', explode( ',', $property_status ) );
-		if ( count( $property_status ) ) {
-			$available_loc_query .= "
-			AND pm.meta_key 		= 'property_status'
-			AND pm.meta_value 		IN (" . implode( ',', array_fill( 0, count( $property_status ), '%s' ) ) . ')';
-			$query_args           = array_merge( $query_args, $property_status );
-		}
+	if ( $status_values ) {
+		$available_loc_query .= '
+			AND pm.meta_value 		IN (' . implode( ',', array_fill( 0, count( $status_values ), '%s' ) ) . ')';
+		$query_args           = array_merge( $query_args, array_values( $status_values ) );
 	}
-	$available_locs = $wpdb->get_col( $wpdb->prepare( $available_loc_query, $query_args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
+
+	$sql = $wpdb->prepare( $available_loc_query, $query_args ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+	$available_locs = epl_listing_query_cache( $sql );
 	$terms          = get_terms(
 		array(
 			'taxonomy'   => $tax,

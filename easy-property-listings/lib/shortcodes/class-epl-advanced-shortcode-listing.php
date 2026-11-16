@@ -72,6 +72,15 @@ class EPL_Advanced_Shortcode_Listing {
 	public $query_open;
 
 	/**
+	 * Shortcode name: picks the args filter (epl_shortcode_{name}_args) and the sorting
+	 * context. [listing] runs on this class with the name 'listing'.
+	 *
+	 * @since 3.6
+	 * @var string $shortcode Shortcode name.
+	 */
+	public $shortcode = 'listing_advanced';
+
+	/**
 	 * Construct the shortcode.
 	 *
 	 * @since 3.3.0
@@ -120,11 +129,19 @@ class EPL_Advanced_Shortcode_Listing {
 	/**
 	 * Get meta key price.
 	 *
+	 * The rent when the shortcode lists rentals only, otherwise the price.
+	 *
 	 * @since 3.3
+	 * @since 3.6 Fix: post_type="rental" with sortby="price" sorted by property_price, because post_type is a list by the time this runs. Now sorts by property_rent, as [listing] did.
 	 */
 	public function get_meta_key_price() {
 
-		if ( is_string( $this->attributes['post_type'] ) && 'rental' === $this->attributes['post_type'] ) {
+		$post_type = $this->attributes['post_type'];
+		if ( is_array( $post_type ) && 1 === count( $post_type ) ) {
+			$post_type = reset( $post_type );
+		}
+
+		if ( is_string( $post_type ) && 'rental' === $post_type ) {
 			$this->meta_key_price = 'property_rent';
 		} else {
 			$this->meta_key_price = 'property_price';
@@ -232,12 +249,27 @@ class EPL_Advanced_Shortcode_Listing {
 	 * Set the post type
 	 *
 	 * @since 3.3
+	 * @since 3.6 Security: post types visitors can't view (contacts) are left out, so post_type="epl_contact" finds nothing.
 	 */
 	public function set_post_type() {
 		if ( ! is_array( $this->attributes['post_type'] ) ) {
 			$this->attributes['post_type'] =
 			array_map( 'trim', explode( ',', $this->attributes['post_type'] ) );
 		}
+
+		// Leave out registered post types visitors can't view, such as contacts. Unregistered
+		// types stay, so a switched off listing type still finds nothing, as before.
+		$post_types = array();
+		foreach ( $this->attributes['post_type'] as $post_type ) {
+			if ( ! is_string( $post_type ) || ( post_type_exists( $post_type ) && ! epl_search_can_show_post_type( $post_type ) ) ) {
+				continue;
+			}
+			$post_types[] = $post_type;
+		}
+		if ( empty( $post_types ) ) {
+			$post_types = array( 'epl_no_post_type' ); // Not registered: the query finds nothing.
+		}
+		$this->attributes['post_type'] = $post_types;
 	}
 
 	/**
@@ -567,6 +599,8 @@ class EPL_Advanced_Shortcode_Listing {
 	 *
 	 * @since 3.3
 	 * @since 3.4.35 Fixed the issue : [listing_advanced] not marked as EPL shortcode in WP_Query object
+	 * @since 3.6 Uses the shortcode name for the sorting context and the args filter, so [listing] keeps epl_shortcode_listing_args.
+	 * @since 3.6 Fix: with sortby set, orderby_clause crashed on PHP 8; a clause without |ASC or |DESC gave a warning (now ASC).
 	 */
 	public function set_orderby_clause() {
 
@@ -578,11 +612,20 @@ class EPL_Advanced_Shortcode_Listing {
 
 			$this->attributes['orderby_clause'] =
 			array_map( 'trim', explode( ',', $this->attributes['orderby_clause'] ) );
+
+			// orderby_clause replaces any sortby order; start from a list.
+			if ( ! isset( $this->args['orderby'] ) || ! is_array( $this->args['orderby'] ) ) {
+				$this->args['orderby'] = array();
+			}
+
 			foreach ( $this->attributes['orderby_clause'] as $oc ) {
 				$oc_array = explode( '|', $oc );
+				$clause   = trim( $oc_array[0] );
+				$order    = isset( $oc_array[1] ) && 'DESC' === strtoupper( trim( $oc_array[1] ) ) ? 'DESC' : 'ASC';
 
-				$this->args['orderby'][ $oc_array[0] ] = $oc_array[1];
-
+				if ( '' !== $clause ) {
+					$this->args['orderby'][ $clause ] = $order;
+				}
 			}
 
 			unset( $this->args['order'] );
@@ -591,9 +634,9 @@ class EPL_Advanced_Shortcode_Listing {
 		$this->args['instance_id'] = $this->attributes['instance_id'];
 
 		// add sortby arguments to query, if listings sorted by $_GET['sortby'];.
-		$this->args = epl_add_orderby_args( $this->args, 'shortcode', 'listing_advanced' );
-		// Option to filter args.
-		$this->args = apply_filters( 'epl_shortcode_listing_advanced_args', $this->args, $this->attributes );
+		$this->args = epl_add_orderby_args( $this->args, 'shortcode', $this->shortcode );
+		// Option to filter args: epl_shortcode_listing_advanced_args, or epl_shortcode_listing_args for [listing].
+		$this->args = apply_filters( 'epl_shortcode_' . $this->shortcode . '_args', $this->args, $this->attributes );
 	}
 
 	/**
@@ -614,12 +657,13 @@ class EPL_Advanced_Shortcode_Listing {
 	 * Get the template
 	 *
 	 * @since 3.3
+	 * @since 3.6 Security: wrap_template is limited to letters, numbers, - and _ (it could reach other files with ../). Underscores now become dashes, as intended.
 	 */
 	public function get_wrap_template() {
 
-		$attributes['wrap_template'] = str_replace( '_', '-', $this->attributes['wrap_template'] );
+		$wrap = str_replace( '_', '-', sanitize_key( (string) $this->attributes['wrap_template'] ) );
 
-		$wrap_template = empty( $this->attributes['wrap_template'] ) ? 'shortcode-listing.php' : 'shortcode-listing-' . $this->attributes['wrap_template'] . '.php';
+		$wrap_template = '' === $wrap ? 'shortcode-listing.php' : 'shortcode-listing-' . $wrap . '.php';
 
 		return $wrap_template;
 	}
@@ -654,18 +698,49 @@ class EPL_Advanced_Shortcode_Listing {
 	 * Render the shortcode
 	 *
 	 * @since 3.3
+	 * @since 3.6 Fix: a wrap_template that doesn't exist falls back to shortcode-listing.php instead of PHP warnings and no listings.
+	 * @since 3.6 The wrapper always has the shortcode's own class (get_wrapper_class()).
 	 */
 	public function render() {
 		$wrap_template = $this->get_wrap_template();
+		$attributes    = $this->attributes;
+
+		$attributes['class'] = $this->get_wrapper_class();
+
 		ob_start();
 		epl_get_template_part(
 			$wrap_template,
 			array(
-				'attributes' => $this->attributes,
+				'attributes' => $attributes,
 				'query_open' => $this->query_open,
-			)
+			),
+			'shortcode-listing.php'
 		);
 
 		return ob_get_clean();
+	}
+
+	/**
+	 * Wrapper classes: the shortcode's own classes, then any class option
+	 *
+	 * Every listing shortcode always has its own class, like the other listing shortcodes
+	 * (epl-shortcode-listing-category and so on): epl-shortcode-listing for [listing] and
+	 * [listing_advanced], plus epl-shortcode-listing-advanced for [listing_advanced]. The
+	 * class option adds to them instead of replacing them.
+	 *
+	 * @return string
+	 *
+	 * @since 3.6 New: [listing] had no wrapper class, and a class option removed epl-shortcode-listing.
+	 */
+	public function get_wrapper_class() {
+		$classes = array( 'epl-shortcode-listing' );
+
+		if ( 'listing' !== $this->shortcode ) {
+			$classes[] = 'epl-shortcode-' . str_replace( '_', '-', sanitize_key( $this->shortcode ) );
+		}
+
+		$extra = isset( $this->attributes['class'] ) ? preg_split( '/\s+/', trim( (string) $this->attributes['class'] ) ) : array();
+
+		return implode( ' ', array_unique( array_filter( array_merge( $classes, (array) $extra ) ) ) );
 	}
 }
